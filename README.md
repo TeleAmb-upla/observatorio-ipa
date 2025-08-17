@@ -9,6 +9,10 @@ Install using Docker.
 ## Usage
 
 Configure to run in a docker container at regular intervals
+IMPORTANT - REMEMBER THAT GOOGLE DRIVE API HAS TO BE ENABLED IN THE PROJECT TO REACH GDRIVE ASSETS
+
+Stats are exported using Classes. Each class is responsible for a specific type of analysis. All classes inherit from a Base class that
+provides export to table functionality.
 
 ## Contributing
 

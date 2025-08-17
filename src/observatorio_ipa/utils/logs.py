@@ -1,52 +1,7 @@
 import logging
+from observatorio_ipa.core.config import LogSettings
 
-# TODO: Replace hardcoded logger name with a project wide variable
-
-logger = logging.getLogger("observatorio_ipa." + __name__)
-
-DEFAULT_LOGGING_CONFIG = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "standard": {
-            "format": "%(asctime)s %(name)s %(levelname)s: %(message)s",
-            "datefmt": "%Y-%m-%d %H:%M:%S",
-        },
-    },
-    "handlers": {
-        "file": {
-            "class": "logging.FileHandler",
-            "filename": "./observatorio_ipa.log",
-            "encoding": "utf-8",
-            "formatter": "standard",
-        },
-    },
-    "loggers": {"observatorio_ipa": {"handlers": ["file"], "level": "INFO"}},
-}
-
-
-def get_log_level(log_level: str | None = "INFO") -> int:
-    """
-    Returns the numerical value of the log level based on the input string.
-    Args:
-        log_level (str): The desired logging level as a string.
-                        Acceptable values are "DEBUG", "INFO", "WARNING", and "ERROR".
-                        Defaults to "INFO".
-    Returns:
-        int: The numerical value of the log level or None if the input is invalid.
-    """
-    if not log_level:
-        log_level = "INFO"
-
-    log_level = log_level.upper()
-    if log_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
-        log_level = "INFO"
-
-    ## Get numerical value of log level.
-    num_log_level = getattr(logging, log_level)
-    # if not isinstance(num_log_level, int):
-    #     raise ValueError(f'Invalid log level: {log_level}')
-    return num_log_level
+logger = logging.getLogger(__name__)
 
 
 def update_logs_config(config: dict | None = None) -> dict:
@@ -86,25 +41,58 @@ def update_logs_config(config: dict | None = None) -> dict:
     return default_config
 
 
-def print_and_log(message: str, log_level: str = "INFO") -> None:
+def get_log_level(log_level: str = "INFO") -> int | None:
     """
-    Print a message to console and to log file
-    If no log file is set, logging will also print to console
-
+    Returns the numerical value of the log level based on the input string.
     Args:
-        message: Message to log
-        log_level: log level to use when logging the message. Valid options are DEBUG, INFO, WARNING, ERROR.
-
+        log_level (str): The desired logging level as a string.
+                        Acceptable values are "DEBUG", "INFO", "WARNING", and "ERROR".
+                        Defaults to "INFO".
     Returns:
-        None
+        int: The numerical value of the log level or None if the input is invalid.
     """
-    print(message)
-    match log_level.upper():
-        case "DEBUG":
-            logger.debug(message)
-        case "INFO":
-            logger.info(message)
-        case "WARNING":
-            logger.warning(message)
-        case "ERROR":
-            logger.error(message)
+    log_level = log_level.strip().upper()
+    if log_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+        log_level = "INFO"
+
+    ## Get numerical value of log level.
+    num_log_level = getattr(logging, log_level, None)
+    return num_log_level
+
+
+def init_logging_config(
+    config: LogSettings, containerized: bool = False
+) -> logging.Logger:
+    """
+    Initialize the logging configuration for the application.
+    This function sets up the logging configuration based on the default settings.
+    It configures the logging format, date format, and log file location.
+    """
+
+    new_logger = logging.getLogger(config.name)
+    new_logger.setLevel(config.level)
+
+    # Formatters
+    formatter = logging.Formatter(fmt=config.format, datefmt=config.date_format)
+
+    # Remove all existing handlers to avoid errors when running in jupyter notebook.
+    # print("Removing console logger")
+    # print(new_logger.handlers)
+    for handler in new_logger.handlers[::-1]:
+        new_logger.removeHandler(handler)
+    # print(new_logger.handlers)
+
+    # File handler
+    fh = logging.FileHandler(filename=config.file, encoding=config.encoding)
+    fh.setLevel(config.level)
+    fh.setFormatter(formatter)
+    new_logger.addHandler(fh)
+
+    # Console handler. Only if running in container to log to stdout/stderr
+    if containerized:
+        ch = logging.StreamHandler()
+        ch.setLevel(config.level)
+        ch.setFormatter(formatter)
+        new_logger.addHandler(ch)
+
+    return new_logger

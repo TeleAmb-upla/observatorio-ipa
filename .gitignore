@@ -163,3 +163,5 @@ cython_debug/
 **/secrets/
 poetry.lock
 **/deprecated/
+configs/
+support_docs/

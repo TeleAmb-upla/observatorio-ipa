@@ -1,0 +1,56 @@
+
+### NOTES:
+
+- Reference GEE scripts: users/observatorionieves/modules (Access provided by Ana)
+- Personal Cloud Project for testing: ee-chompitest
+- Service Account for testing: Not created
+
+- [x] Identify and get access to the GCP Cloud Project.
+- [x] Create service account for testing
+- [X] Grant erick and service account access to assets
+
+
+## CSV EXPORT
+
+Section 2 of reference script (RUN YEARLY)
+- [X] Recode module tc_SP ('users/observatorionieves/modules:Estadistica/Cuencas/Rasters/tc_SP', 42 lines) Export Snow Persistence (Raster/image?)
+- [X] Recode module tc_ST ('users/observatorionieves/modules:Estadistica/Cuencas/Rasters/tc_ST', 42 lines) Export Tendency of Snow Persistence (Raster/image?)
+
+Section 3 of reference script (RUN MONTHLY)
+- [X] Recode module elev_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/Elev/Elev_BNA', 507 lines). Calculates the area (km2) per 100m of elevation 
+    Q. does this refer to total area across all locations that fall within each elevation band?
+- [X] Recode module SCA_elev_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/Elev/SCA_elev_BNA', 208 lines). Calculates the Snow Persistence (SP%) per 100m of elevation
+    Q. What is Snow Persistence in this context? is it a percentage or an absolute value? if it's a percentage what is the denominator?
+    Q. does this refer to total Snow Persistence across all locations that fall within each elevation band?
+
+Section 4 of reference script (MONTHLY DATA) (RUN MONTHLY)
+- [X] Recode module SCA_m_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/Month/SCA_m_BNA', 117 lines). Calculates Monthly Average of Snow Persistence (SP%) for all months 
+    Q. Check if this is Percentage or absolute value?
+- [X] Recode module SCA_m_elev_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/Month/SCA_m_elev_BNA', 276 lines). Calculates Monthly Average of Snow Persistence (SP%) for each 100m of elevation, for each month
+    Q. How is this difference from SCA_elev_BNA
+- [X] Recode module SCA_m_trend_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/Month/SCA_m_trend_BNA', 351 lines). Calculates Trend of Monthly Average of Snow Persistence (SP%)
+
+Section 5 of reference script (YEARLY DATA) This is more like YTD. (RUN MONTHLY)
+- [X] Recode module SCA_y_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/Year/SCA_y_BNA', 91 lines). Calculates Yearly Average of Snow Persistence (SP%) for all years
+- [X] Recode module SCA_y_elev_BNA('users/observatorionieves/modules:Estadistica/Cuencas/Year/SCA_y_elev_BNA', 260 lines) Calculate Yearly Average of Snow Persistence (SP%) for each 100m of elevation
+- [X] Recode module SCA_y_t_area_BNA('users/observatorionieves/modules:Estadistica/Cuencas/Year/SCA_y_t_area_BNA', 389 lines) Calculates the area per Tendency of yearly average of snow persistence
+- [X] Recode module SCA_y_t_elev_BNA('users/observatorionieves/modules:Estadistica/Cuencas/Year/SCA_y_t_elev_BNA', 330 lines); Calculates the the Tendency of yearly average of snow persistence for each 100m of elevation
+- [X] Recode module snowline_y_BNA('users/observatorionieves/modules:Estadistica/Cuencas/Year/snowline_y_BNA', 182 lines) calculates the yearly average of snowline 
+
+Section 6 of reference script (YEARLY MONTHLY DATA) (RUN MONTHLY)
+    Q. What's the difference with section 4?
+- [X] Recode module SCA_y_m_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/YearMonth/SCA_y_m_BNA', 126 lines) Calculate average Snow persistence per year/month (Format Year/month)
+- [X] Recode module SCA_ym_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/YearMonth/SCA_ym_BNA', 112 lines) Calculate average Snow persistence per year/month (Format Date)
+- [X] Recode module SCA_ym_elev_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/YearMonth/SCA_ym_elev_BNA', 266 lines) Calculate average Snow Persistence per year/month for every 100m of elevation 
+- [X] Recode module snowline_ym_BNA ('users/observatorionieves/modules:Estadistica/Cuencas/YearMonth/snowline_ym_BNA', 176 lines) Calculate average snowline per year/month
+
+Section 7 of reference Script (NATIONAL DATA) (RUN YEARLY)
+
+- [X] Recode module tc_SP_SCA ('users/observatorionieves/modules:Estadistica/Nacional/tc_SP_SCA', 283 lines); Calculate Total Average of Snow Persistence (SP%) (2000-2024)  for all BNA watersheds by snow category (Permanent, seasonal, intermittent)
+- [X] Recode module tc_SP_area ('users/observatorionieves/modules:Estadistica/Nacional/tc_SP_area', 354 lines); Calculate the snow area (km2) per snow category (permanent, seasonal, intermittent) for all BNA watersheds
+- [X] Recode module tc_ca_SCA ('users/observatorionieves/modules:Estadistica/Nacional/tc_ca_SCA', 346 lines); Calculate the accumulated tendency of Total Average of Snow Persistence (SP%) (2000-2024)
+- [X] Recode module tc_ca_area ('users/observatorionieves/modules:Estadistica/Nacional/tc_ca_area', 268 lines); Calculate the area (km2) per accumulated tendency (2000-2024)
+- [X] Recode module tc_ca_snowline ('users/observatorionieves/modules:Estadistica/Nacional/tc_ca_snowline', 256 lines); Calculate the accumulated tendency of the snowline
+- [X] Recode module tc_SP_anomalia ('users/observatorionieves/modules:Estadistica/Nacional/tc_SP_anomalia', 175 lines); Calculate the anomaly of the last year with respect to the total average (2000-2024)
+- [X] Recode module tm_SP_area ('users/observatorionieves/modules:Estadistica/Nacional/tm_SP_area', 296 lines); Calculate the Total average Snow Persistence (SP%) (2000-2024) for the BNA Macrozones by snow category (Permanent, seasonal, intermittent)
+- [X] Recode module tm_SP_y_t_area ('users/observatorionieves/modules:Estadistica/Nacional/tm_SP_y_t_area', 342 lines); Calculate the area by tendency of Total Average Snow Persistence (SP%) by BNA Macrozone
