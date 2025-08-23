@@ -59,18 +59,19 @@ def _calc_ym_means_per_basin(
 # TODO: Fix Class name to meet Python conventions
 class SCA_YM_BNA(common.BaseBasinStats):
     """Class to calculate SCA (Snow Cover Area) and CCA (Cloud Cover Area) mean values for every image across a multi year Time
-        Series ImageCollection and an Area of Interest (basin).
+    Series ImageCollection and an Area of Interest (basin).
 
     Args:
-            ee_icollection (ImageCollection): ImageCollection with monthly images.
-            ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
-            basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
-            export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
-            export_path (str): Path to export the results.
-            table_prefix (str): Prefix for the table name.
-            basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
-            exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
-            max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
+        ee_icollection (ImageCollection): ImageCollection with monthly images.
+        ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
+        basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
+        export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
+        export_path (str): Path to export the results.
+        table_prefix (str): Prefix for the table name.
+        basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
+        exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
+        max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
+        bucket (str | None): Cloud Storage bucket name. Required if export_target is 'storage'.
     """
 
     def __init__(
@@ -83,6 +84,7 @@ class SCA_YM_BNA(common.BaseBasinStats):
         table_prefix: str,  # "MCD_SCA_ym_BNA_" + cuenca
         basin_codes: list[str] | None = None,
         max_exports: int | None = None,
+        bucket: str | None = None,
         **kwargs,
     ):
         # lazy argument passing. Consider moving to explicit arguments

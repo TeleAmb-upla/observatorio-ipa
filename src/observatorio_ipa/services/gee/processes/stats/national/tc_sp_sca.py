@@ -162,6 +162,22 @@ def _ee_calc_national_snow_persistence(
 
 
 class TC_SP_SCA(common.BaseNationalStats):
+    """
+    National statistics for SP SCA (Snow Persistence Snow Cover Area).
+
+    Args:
+        ee_icollection (ImageCollection): ImageCollection with yearly images.
+        ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
+        basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
+        export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
+        export_path (str): Path to export the results.
+        table_name (str): Name for the exported table.
+        basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
+        exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
+        max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
+        bucket (str | None): Cloud Storage bucket name. Required if export_target is 'storage'.
+    """
+
     def __init__(
         self,
         ee_icollection: ee.imagecollection.ImageCollection,
@@ -173,6 +189,7 @@ class TC_SP_SCA(common.BaseNationalStats):
         basin_codes: list[str] | None = None,
         exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,
+        bucket: str | None = None,
         **kwargs,
     ):
         # lazy argument passing. Consider moving to explicit arguments

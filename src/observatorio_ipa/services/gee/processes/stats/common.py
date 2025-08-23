@@ -394,6 +394,7 @@ class BaseStats(ABC):
     task_list: ExportTaskList
     export_target: str
     export_path: str
+    bucket: str
     bands_of_interest: list[str]
 
     @abstractmethod
@@ -439,10 +440,12 @@ class BaseStats(ABC):
 
                     case "storage":
                         #! Need fixing bucket vs save path
+                        storage_path = Path(self.export_path, table_name)
                         task = ee.batch.Export.table.toCloudStorage(
                             collection=ee_stats_fc,
                             description=table_name,
-                            bucket=self.export_path,
+                            bucket=self.bucket,
+                            fileNamePrefix=storage_path.as_posix(),
                             fileFormat="CSV",
                         )
 
@@ -455,6 +458,7 @@ class BaseStats(ABC):
                     ),
                     target=self.export_target,
                     path=self.export_path,
+                    bucket=self.bucket,
                     task=task,
                 )
 
@@ -469,6 +473,7 @@ class BaseStats(ABC):
                     ),
                     target=self.export_target,
                     path=self.export_path,
+                    bucket=self.bucket,
                     error=str(e),
                 )
                 continue
@@ -704,6 +709,7 @@ class BaseNationalStats(BaseStats):
         return
 
 
+# TOODO: Verify Export Tasks, add options to Drive/Storage
 class BaseBasinRasters(ABC):
 
     max_exports: int | None
@@ -713,6 +719,7 @@ class BaseBasinRasters(ABC):
     task_list: ExportTaskList
     export_target: str
     export_path: str
+    bucket: str | None
     bands_of_interest: list[str]
 
     def __init__(
@@ -726,6 +733,7 @@ class BaseBasinRasters(ABC):
         basin_codes: list[str] | None = None,
         exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,
+        bucket: str | None = None,
         **kwargs,
     ) -> None:
         if export_target not in VALID_EXPORT_TARGETS:
@@ -735,6 +743,7 @@ class BaseBasinRasters(ABC):
         self.basins_cd_property = basins_cd_property
         self.export_target = export_target
         self.export_path = export_path
+        self.bucket = bucket
         self.img_prefix = img_prefix
         self.basin_codes = basin_codes
         self.exclude_basin_codes = exclude_basin_codes

@@ -138,6 +138,7 @@ class Snowline_YM_BNA(common.BaseBasinStats):
         basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
         exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
         max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
+        bucket (str | None): Cloud Storage bucket name. Required if export_target is 'storage'.
     """
 
     def __init__(
@@ -151,6 +152,7 @@ class Snowline_YM_BNA(common.BaseBasinStats):
         table_prefix: str,
         basin_codes: list[str] | None = None,
         max_exports: int | None = None,
+        bucket: str | None = None,
         **kwargs,
     ):
         # lazy argument passing. Consider moving to explicit arguments

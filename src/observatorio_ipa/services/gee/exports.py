@@ -73,6 +73,7 @@ class ExportTask:
         name (str): The name of exported asset at the target.
         target (str): The export destination ({VALID_EXPORT_TARGETS}).
         path (str | Path): The path to the asset to be exported.
+        bucket (str | None): The bucket name for Google Cloud Storage exports.
         task (ee_batch.Task | None): The underlying Earth Engine batch task.
         status (str): The current status of the export task. superset of task_status.
         task_status (str): The current status of the GEE task per last query.
@@ -102,6 +103,7 @@ class ExportTask:
         name: str,
         target: str,
         path: str | Path,
+        bucket: str | None = None,
         task: ee_batch.Task | None = None,
         task_status: str | None = None,
         error: str | None = None,
@@ -112,7 +114,7 @@ class ExportTask:
         self.name = name
         self.target = target
         self.path = Path(path)
-
+        self.bucket = bucket
         self._status_update_failures = 0
         self.task = task
         if not task_status:
@@ -326,6 +328,7 @@ class ExportTaskList:
         name: str,
         target: str,
         path: str | Path,
+        bucket: str | None = None,
         task: ee_batch.Task | None = None,
         task_status: str | None = None,
         error: str | None = None,
@@ -339,6 +342,7 @@ class ExportTaskList:
             name (str): The name of exported asset at the target.
             target (str): The export destination ({VALID_EXPORT_TARGETS}).
             path (str | Path ): The path to the asset to be exported.
+            bucket (str | None): The bucket name for Google Cloud Storage exports.
             task (ee_batch.Task | None): The underlying Earth Engine batch task.
             task_status (str | None): A status for the GEE task.
             error (str | None): The error message if the export task failed.
@@ -351,6 +355,7 @@ class ExportTaskList:
                 name=name,
                 target=target,
                 path=path,
+                bucket=bucket,
                 task=task,
                 task_status=task_status,
                 error=error,
