@@ -103,16 +103,16 @@ def _ee_calc_stats_per_elev_bin(
 
 class SCA_Elev_BNA(common.BaseBasinStats):
     """Class to calculate SCA (Snow Cover Area) and CCA (Cloud Cover Area) means per elevation bin for a Time Series
-    ImageCollection and an Area of Interest (basin)
+    ImageCollection and an Area of Interest (basin).
 
     Args:
         ee_icollection (ImageCollection): ImageCollection with monthly images.
         ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
         basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
         ee_dem_img (Image): DEM image to use for elevation bins (assumes elevation has been segmented to bins).
-        export_target (Literal["gdrive", "gee_assets"]): Target were results will be exported either "gdrive" or "gee_assets".
-        export_path (str): Path to export the results
-        table_prefix (str): Prefix for the table name
+        export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
+        export_path (str): Path to export the results.
+        table_prefix (str): Prefix for the table name.
         basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
         exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
         max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
@@ -124,7 +124,7 @@ class SCA_Elev_BNA(common.BaseBasinStats):
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
         ee_dem_img: ee.image.Image,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,  # "elev_ee"
         table_prefix: str,  # "MCD_SCA_elev_BNA_" + cuenca
         basin_codes: list[str] | None = None,

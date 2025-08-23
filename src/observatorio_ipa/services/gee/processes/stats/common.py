@@ -1,10 +1,12 @@
 import ee
 import ee.batch
 
+from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Literal
 
 from observatorio_ipa.core.defaults import DEFAULT_SCALE, DEFAULT_CHI_PROJECTION
+from observatorio_ipa.services.gee.exports import ExportTaskList, VALID_EXPORT_TARGETS
 
 
 #! Description of this function might be incorrect, need to better explain what the correction is
@@ -376,12 +378,20 @@ def _ee_copy_feature_property_across_fc(
     )
 
 
+def add_csv_suffix(file_path: str) -> str:
+    """Add .csv suffix to the file name if not present."""
+    path = Path(file_path)
+    if path.suffix != ".csv":
+        path = path.with_suffix(".csv")
+    return path.as_posix()
+
+
 class BaseStats(ABC):
     max_exports: int | None
     basin_codes: list[str] | None
     exclude_basin_codes: list[str] | None
     stats: list[dict]
-    task_list: list
+    task_list: ExportTaskList
     export_target: str
     export_path: str
     bands_of_interest: list[str]
@@ -390,54 +400,77 @@ class BaseStats(ABC):
     def calc_stats(self) -> None:
         pass
 
-    def make_exports(self) -> list:
+    def make_exports(self) -> ExportTaskList:
 
         if not hasattr(self, "stats"):
             print("No basin stats available. Please run calc_stats() first.")
-            return []
+            return ExportTaskList()
 
         max_exports = self.max_exports
         if not max_exports:
             max_exports = len(self.stats)
 
-        task_list = []
+        task_list = ExportTaskList()
         for stats_item in self.stats:
+            # Get stats for basin
             ee_stats_fc = stats_item["ee_stats_fc"]
             table_name = stats_item["table_name"]
             print(f"Exporting Table: {table_name}")
-
             try:
+                match self.export_target:
+                    case "gdrive":
+                        task = ee.batch.Export.table.toDrive(
+                            collection=ee_stats_fc,
+                            description=table_name,
+                            selectors=self.bands_of_interest,
+                            fileNamePrefix=table_name,
+                            folder=self.export_path,
+                            fileFormat="CSV",
+                        )
 
-                # Get stats for basin
+                    case "gee":
+                        # Adding dummy geometry to avoid errors in export
+                        ee_stats_fc = ee_stats_fc.map(_ee_assign_dummy_geom)
+                        task = ee.batch.Export.table.toAsset(
+                            collection=ee_stats_fc,
+                            description=table_name,
+                            assetId=f"{self.export_path}/{table_name}",
+                        )
 
-                if self.export_target == "gdrive":
-                    task = ee.batch.Export.table.toDrive(
-                        collection=ee_stats_fc,
-                        description=table_name,
-                        selectors=self.bands_of_interest,
-                        fileNamePrefix=table_name,
-                        folder=self.export_path,
-                        fileFormat="CSV",
-                    )
+                    case "storage":
+                        #! Need fixing bucket vs save path
+                        task = ee.batch.Export.table.toCloudStorage(
+                            collection=ee_stats_fc,
+                            description=table_name,
+                            bucket=self.export_path,
+                            fileFormat="CSV",
+                        )
 
-                elif self.export_target == "gee_assets":
-                    # Adding dummy geometry to avoid errors in export
-                    ee_stats_fc = ee_stats_fc.map(_ee_assign_dummy_geom)
-
-                    task = ee.batch.Export.table.toAsset(
-                        collection=ee_stats_fc,
-                        description=table_name,
-                        assetId=f"{self.export_path}/{table_name}",
-                    )
-                else:
-                    raise ValueError(
-                        f"Invalid export target: {self.export_target}. Allowed values are 'gdrive' or 'gee_assets'."
-                    )
-
-                task_list.append(task)
+                task_list.add_task(
+                    type="table",
+                    name=(
+                        add_csv_suffix(table_name)
+                        if self.export_target in ["gdrive", "storage"]
+                        else table_name
+                    ),
+                    target=self.export_target,
+                    path=self.export_path,
+                    task=task,
+                )
 
             except Exception as e:
                 print(f"Error exporting table {table_name}: {e}")
+                task_list.add_task(
+                    type="table",
+                    name=(
+                        add_csv_suffix(table_name)
+                        if self.export_target in ["gdrive", "storage"]
+                        else table_name
+                    ),
+                    target=self.export_target,
+                    path=self.export_path,
+                    error=str(e),
+                )
                 continue
             finally:
                 max_exports -= 1
@@ -448,37 +481,26 @@ class BaseStats(ABC):
         self.task_list = task_list
         return self.task_list
 
-    def start_exports(self):
+    def start_exports(self) -> None:
         """Start all export tasks."""
         if not hasattr(self, "task_list"):
             print("No tasks to start. Please run make_exports() first.")
             return
 
-        for task in self.task_list:
-            try:
-                task.start()
-            except Exception as e:
-                print(f"Error starting task {task.description}: {e}")
+        self.task_list.start_exports()
 
-    def get_task_status(self):
+    def get_task_status(self) -> list[str]:
         if not hasattr(self, "task_list"):
             print("No tasks to track. Please run make_exports() first.")
             return []
 
-        task_list = [task for task in self.task_list if task is not None]
-        # Manually monitor task status
-        latest_status = []
-        status = []
-        for task in task_list:
-            updated_status = task.status()
-            latest_status.append(updated_status)
-            status.append(updated_status["state"])
-            # print(f"Task {task.id} status: {task.status()['state']}")
+        self.task_list.query_status()
+        print(self.task_list.pretty_summary())
 
-        # count per state
-        status_count = {state: status.count(state) for state in set(status)}
-        print("Task status count:", status_count)
-        self.latest_status = latest_status
+        latest_status = []
+        for task in self.task_list:
+            latest_status.append(str(task))
+
         return latest_status
 
     def get_stats_item(self, id) -> dict | None:
@@ -500,7 +522,7 @@ class BaseBasinStats(BaseStats):
         ee_icollection: ee.imagecollection.ImageCollection,
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,
         table_prefix: str,
         # ee_dem_img: ee.image.Image, # Removing from Base, not used in all processes
@@ -510,6 +532,8 @@ class BaseBasinStats(BaseStats):
         max_exports: int | None = None,
         **kwargs,
     ):
+        if export_target not in VALID_EXPORT_TARGETS:
+            raise ValueError(f"Invalid export_target: {export_target}")
         self.ee_icollection = ee_icollection
         self.ee_basins_fc = ee_basins_fc
         self.basins_cd_property = basins_cd_property
@@ -594,7 +618,7 @@ class BaseNationalStats(BaseStats):
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
         bands_of_interest: list[str],
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: Literal["gdrive", "gee"],
         export_path: str,
         table_name: str,
         # ee_dem_img: ee.image.Image, # Removing from Base, not used in all processes
@@ -602,8 +626,10 @@ class BaseNationalStats(BaseStats):
         exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,
         **kwargs,
-    ):
+    ) -> None:
 
+        if export_path not in ["gdrive", "gee"]:
+            raise ValueError(f"Invalid export_path: {export_path}")
         self.ee_icollection = ee_icollection
         self.ee_basins_fc = ee_basins_fc
         self.basins_cd_property = basins_cd_property
@@ -684,7 +710,7 @@ class BaseBasinRasters(ABC):
     basin_codes: list[str] | None
     exclude_basin_codes: list[str] | None
     rasters: list[dict]
-    task_list: list
+    task_list: ExportTaskList
     export_target: str
     export_path: str
     bands_of_interest: list[str]
@@ -694,7 +720,7 @@ class BaseBasinRasters(ABC):
         ee_image: ee.image.Image,
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,
         img_prefix: str,
         basin_codes: list[str] | None = None,
@@ -702,6 +728,8 @@ class BaseBasinRasters(ABC):
         max_exports: int | None = None,
         **kwargs,
     ) -> None:
+        if export_target not in VALID_EXPORT_TARGETS:
+            raise ValueError(f"Invalid export_target: {export_target}")
         self.ee_image = ee_image
         self.ee_basins_fc = ee_basins_fc
         self.basins_cd_property = basins_cd_property
@@ -783,17 +811,17 @@ class BaseBasinRasters(ABC):
         # TODO: Add method to capture which basins failed and why
         return
 
-    def make_exports(self) -> list:
+    def make_exports(self) -> ExportTaskList:
 
         if not hasattr(self, "rasters"):
             print("No basin rasters available. Please run make_rasters() first.")
-            return []
+            return ExportTaskList()
 
         max_exports = self.max_exports
         if not max_exports:
             max_exports = len(self.rasters)
 
-        task_list = []
+        task_list = ExportTaskList()
         for raster_item in self.rasters:
             ee_raster_img = raster_item["ee_image"]
             ee_basin_fc = raster_item["ee_basin_fc"]
@@ -801,7 +829,6 @@ class BaseBasinRasters(ABC):
             print(f"Exporting image: {img_name}")
 
             try:
-
                 export_opts = {
                     "image": ee_raster_img,
                     "description": img_name,
@@ -809,30 +836,45 @@ class BaseBasinRasters(ABC):
                     "region": ee_basin_fc.geometry(),
                     "maxPixels": 1e13,
                 }
+                match self.export_target:
+                    case "gdrive":
+                        task = ee.batch.Export.image.toDrive(
+                            **export_opts,
+                            folder=self.export_path,
+                            fileFormat="GeoTIFF",
+                        )
 
-                if self.export_target == "gdrive":
-                    # Create export task to GDrive
-                    task = ee.batch.Export.image.toDrive(
-                        **export_opts,
-                        folder=self.export_path,
-                        fileFormat="GeoTIFF",
-                    )
+                    case "gee":
+                        task = ee.batch.Export.image.toAsset(
+                            **export_opts,
+                            assetId=f"{self.export_path}/{img_name}",
+                        )
 
-                elif self.export_target == "gee_assets":
-                    # Temporary export to GEE Assets for testing
-                    task = ee.batch.Export.image.toAsset(
-                        **export_opts,
-                        assetId=f"{self.export_path}/{img_name}",
-                    )
-                else:
-                    raise ValueError(
-                        f"Invalid export target: {self.export_target}. Allowed values are 'gdrive' or 'gee_assets'."
-                    )
+                    case "storage":
+                        task = ee.batch.Export.image.toCloudStorage(
+                            **export_opts,
+                            bucket=self.export_path,
+                            fileName=img_name,
+                            fileFormat="GeoTIFF",
+                        )
 
-                task_list.append(task)
+                task_list.add_task(
+                    type="image",
+                    name=img_name,
+                    target=self.export_target,
+                    path=self.export_path,
+                    task=task,
+                )
 
             except Exception as e:
                 print(f"Error exporting table {img_name}: {e}")
+                task_list.add_task(
+                    type="image",
+                    name=img_name,
+                    target=self.export_target,
+                    path=self.export_path,
+                    error=str(e),
+                )
                 continue
             finally:
                 max_exports -= 1
@@ -849,35 +891,24 @@ class BaseBasinRasters(ABC):
             print("No tasks to start. Please run make_exports() first.")
             return
 
-        for task in self.task_list:
-            try:
-                task.start()
-            except Exception as e:
-                print(f"Error starting task {task.description}: {e}")
+        self.task_list.start_exports()
 
     def get_task_status(self):
         if not hasattr(self, "task_list"):
             print("No tasks to track. Please run make_exports() first.")
             return []
 
-        task_list = [task for task in self.task_list if task is not None]
-        # Manually monitor task status
-        latest_status = []
-        status = []
-        for task in task_list:
-            updated_status = task.status()
-            latest_status.append(updated_status)
-            status.append(updated_status["state"])
-            # print(f"Task {task.id} status: {task.status()['state']}")
+        self.task_list.query_status()
+        print(self.task_list.pretty_summary())
 
-        # count per state
-        status_count = {state: status.count(state) for state in set(status)}
-        print("Task status count:", status_count)
-        self.latest_status = latest_status
+        latest_status = []
+        for task in self.task_list:
+            latest_status.append(str(task))
+
         return latest_status
 
-    def get_stats_item(self, id) -> dict | None:
-        """Get stats item by id."""
+    def get_raster_item(self, id) -> dict | None:
+        """Get raster item by id."""
         if not hasattr(self, "rasters"):
             print("No basin rasters available. Please run make_rasters() first.")
             return None

@@ -125,14 +125,14 @@ def _ee_calc_ym_snowline_per_basin(
 # TODO: Fix Class name to meet Python conventions
 class Snowline_YM_BNA(common.BaseBasinStats):
     """Class to calculate Snowline mean values for every image across a multi year TimeSeries ImageCollection and an Area
-    of Interest (basin)
+    of Interest (basin).
 
     Args:
         ee_icollection (ImageCollection): ImageCollection with monthly images.
         ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
         basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
         ee_dem_img (Image): DEM image to calculate snowline elevation.
-        export_target (Literal["gdrive", "gee_assets"]): Target were results will be exported either "gdrive" or "gee_assets".
+        export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
         export_path (str): Path to export the results.
         table_prefix (str): Prefix for the table name.
         basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
@@ -146,7 +146,7 @@ class Snowline_YM_BNA(common.BaseBasinStats):
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
         ee_dem_img: ee.image.Image,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,
         table_prefix: str,
         basin_codes: list[str] | None = None,

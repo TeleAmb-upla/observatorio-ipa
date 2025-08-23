@@ -144,7 +144,7 @@ class TC_CA_Area(common.BaseNationalStats):
         ee_icollection: ee.imagecollection.ImageCollection,
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,  # "total_ee"
         table_name: str,  # "MCD_tc_ca_area"
         basin_codes: list[str] | None = None,

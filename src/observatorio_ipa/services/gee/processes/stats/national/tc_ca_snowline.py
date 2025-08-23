@@ -280,7 +280,7 @@ class TC_CA_Snowline(common.BaseNationalStats):
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
         ee_dem_img: ee.image.Image,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,  # "total_ee"
         table_name: str,  # "MCD_tc_ca_snowline"
         basin_codes: list[str] | None = None,

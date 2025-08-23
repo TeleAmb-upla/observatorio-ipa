@@ -123,7 +123,7 @@ class SplitImagePerBasins(BaseBasinRasters):
         ee_image: ee.image.Image,
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,
         img_prefix: str,
         basin_codes: list[str] | None = None,

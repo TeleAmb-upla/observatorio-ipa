@@ -220,7 +220,7 @@ class SCA_M_Trend_BNA(common.BaseBasinStats):
         ee_icollection (ImageCollection): ImageCollection with monthly images.
         ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
         basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
-        export_target (Literal["gdrive", "gee_assets"]): Target were results will be exported either "gdrive" or "gee_assets".
+        export_target (str): Target were results will be exported. [gdrive, gee, storage].
         export_path (str): Path to export the results
         table_prefix (str): Prefix for the table name
         basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
@@ -233,7 +233,7 @@ class SCA_M_Trend_BNA(common.BaseBasinStats):
         ee_icollection: ee.imagecollection.ImageCollection,
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,  # "month_ee"
         table_prefix: str,  # "MCD_SCA_m_trend_BNA_" + cuenca
         basin_codes: list[str] | None = None,

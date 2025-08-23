@@ -227,18 +227,18 @@ def _ee_calc_year_trend_per_basin(
 # TODO: Fix Class name to meet Python conventions
 class SCA_Y_T_AREA_BNA(common.BaseBasinStats):
     """Calculate Area per Sen's Slope bin of SCA (Snow Cover Area) change across a multi-year Time Series
-      ImageCollection with yearly images and an Area of Interest (basin)
+        ImageCollection with yearly images and an Area of Interest (basin).
 
     Args:
-        ee_icollection (ImageCollection): ImageCollection with yearly images.
-        ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
-        basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
-        export_target (Literal["gdrive", "gee_assets"]): Target were results will be exported either "gdrive" or "gee_assets".
-        export_path (str): Path to export the results
-        table_prefix (str): Prefix for the table name
-        basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
-        exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
-        max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
+            ee_icollection (ImageCollection): ImageCollection with yearly images.
+            ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
+            basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
+            export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
+            export_path (str): Path to export the results.
+            table_prefix (str): Prefix for the table name.
+            basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
+            exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
+            max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
     """
 
     def __init__(
@@ -246,7 +246,7 @@ class SCA_Y_T_AREA_BNA(common.BaseBasinStats):
         ee_icollection: ee.imagecollection.ImageCollection,
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,  # "year_ee"
         table_prefix: str,  # "MCD_SCA_y_t_area_BNA_" + cuenca
         basin_codes: list[str] | None = None,

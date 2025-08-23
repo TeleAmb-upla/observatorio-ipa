@@ -161,13 +161,13 @@ def _ee_calc_month_basin_stats(
 
 class SCA_M_BNA(common.BaseBasinStats):
     """Class to calculate SCA (Snow Cover Area) statistics for the months of the year (January, February)
-    across a multi year Time Series ImageCollection and an Area of Interest (basin)
+    across a multi year Time Series ImageCollection and an Area of Interest (basin).
 
     Args:
         ee_icollection (ImageCollection): ImageCollection with monthly images.
         ee_basins_fc (FeatureCollection): FeatureCollection with basin polygons.
         basins_cd_property (str): Name of the property that has basin codes in the FeatureCollection.
-        export_target (Literal["gdrive", "gee_assets"]): Target were results will be exported either "gdrive" or "gee_assets".
+        export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
         export_path (str): Path to export the results.
         table_prefix (str): Prefix for the table name.
         basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
@@ -180,7 +180,7 @@ class SCA_M_BNA(common.BaseBasinStats):
         ee_icollection: ee.imagecollection.ImageCollection,
         ee_basins_fc: ee.featurecollection.FeatureCollection,
         basins_cd_property: str,
-        export_target: Literal["gdrive", "gee_assets"],
+        export_target: str,
         export_path: str,  # "month_ee"
         table_prefix: str,  # "MCD_SCA_m_BNA_" + cuenca
         basin_codes: list[str] | None = None,
