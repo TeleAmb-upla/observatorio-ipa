@@ -7,7 +7,6 @@ import ee.batch
 from gee_toolbox.gee import assets
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from shapely import boundary
 
 from observatorio_ipa.core.config import LOGGER_NAME
 from observatorio_ipa.core.defaults import (
@@ -20,8 +19,24 @@ from observatorio_ipa.core.defaults import (
 from observatorio_ipa.services.gee import dates as gee_dates
 from observatorio_ipa.services.gee.processes import reclass_and_impute
 from observatorio_ipa.utils import dates as utils_dates
+from observatorio_ipa.services.gee.exports import ExportTaskList
 
 logger = logging.getLogger(LOGGER_NAME)
+
+
+def _fix_name_prefix(name_prefix: str) -> str:
+    """Fixes the name prefix to end with '\\_' if last character is not '\\_' or '-'.
+
+    Args:
+        name_prefix (str): The name prefix to fix.
+
+    Returns:
+        str: The fixed name prefix.
+    """
+
+    if not name_prefix.endswith("_") and not name_prefix.endswith("-"):
+        return name_prefix + "_"
+    return name_prefix
 
 
 def _monthly_images_pending_export(
@@ -30,8 +45,8 @@ def _monthly_images_pending_export(
     """Returns the dates (YYYY-MM) of images pending exported to an assets path.
 
     Image names are expected to have one of the following formats:
-        - name_prefix_YYYY-MM
-        - name_prefix_YYYY_MM
+        - [name_prefix]YYYY-MM
+        - [name_prefix]YYYY_MM
         (or if no name_prefix is provided)
         - *YYYY-MM
         - *YYYY_MM
@@ -52,7 +67,6 @@ def _monthly_images_pending_export(
     # monthly_collection_path will not be checked here since it's already checked to exist and
     # be a 'container' type in main process flow.
     # TODO: Replace typechecking with pydantic
-    # TODO: Update typing and documentation of assets.list_assets
     # TODO: Update typing and documentation of assets.get_asset_names
 
     if not isinstance(expected_dates, list):
@@ -71,6 +85,7 @@ def _monthly_images_pending_export(
         pattern = rf"^{name_prefix}{date_pattern}$"
     else:
         pattern = rf".*{date_pattern}$"
+
     exported_images = [img for img in exported_images if re.fullmatch(pattern, img)]
 
     # Get Year-month from image names. Correct months that end with "YYYY_MM"
@@ -204,7 +219,7 @@ def _ic_monthly_mean(
     ee_ym: ee.ee_string.String,
     ee_collection: ee.imagecollection.ImageCollection,
     ee_aoi_fc: ee.featurecollection.FeatureCollection,
-):
+) -> ee.image.Image:
     """
     Calculate the monthly mean of bands Snow_TAC and Cloud_TAC from an image collection for a given year-month
 
@@ -231,7 +246,7 @@ def _ic_monthly_mean(
 
     ee_snow_mean_img = ee_selected.select("Snow_TAC").mean()
     ee_cloud_mean_img = ee_selected.select("Cloud_TAC").mean()
-    return (
+    return ee.image.Image(
         ee.image.Image([ee_snow_mean_img, ee_cloud_mean_img])
         .clip(ee_aoi_fc)
         .set("year", i_year)
@@ -240,37 +255,65 @@ def _ic_monthly_mean(
     )
 
 
-def monthly_export_proc(
+# TODO: include full image name in results (to export, excluded, etc)
+# TODO: Improve Error handling
+# TODO: move prefix fixing to config validation
+# TODO: replace tracking and reporting with ExportPlan object
+# TODO: add debug logs to track the process
+# TODO: Improve documentation
+# TODO: Check if there's any benefit to pre-filtering Terra & Aqua collections
+# ?: Should this try to export all images since 2003 if months_list is not provided?
+# No error control added here since it's expected that all paths and parameters have been checked in main.py
+# This process will not overwrite an image if it already exists in the target collection
+
+
+def monthly_img_export_proc(
     monthly_collection_path: str,
     aoi_path: str,
     dem_path: str,
     name_prefix: str,
     months_list: list[str] | None = None,
-):
-    # TODO: include full image name in results (to export, excluded, etc)
-    # TODO: Improve Error handling
-    # TODO: move prefix fixing to config validation
-    # TODO: replace tracking and reporting with ExportPlan object
-    # TODO: add debug logs to track the process
-    # TODO: Improve documentation
-    # TODO: Check if there's any benefit to pre-filtering Terra & Aqua collections
+) -> dict:
+    """Workflow to export monthly images with Cloud and Snow TAC bands.
 
-    # ?: Should this try to export all images since 2003 if months_list is not provided?
-    # No error control added here since it's expected that all paths and parameters have been checked in main.py
-    # This process will not overwrite an image if it already exists in the target collection
+    This workflow orchestrates the process of exporting monthly images by identifying pending images
+        to export, identifying available daily images in Terra/Aqua, filtering collections, calculating
+        Snow/Cloud TAC values, collapsing to monthly images and creating export tasks.
+
+    If months_list is not provided, the process will attempt to export all months available in Terra/Aqua
+    that have not yet been exported. This is also referred to as Initial_Export_Plan.
+
+    Returns a dictionary with the following keys
+    - "frequency": "monthly"
+    - "initial_export_plan" (list(str)): Initial Export Plan ['2003-01', '2003-02', ...]
+    - "images_pending_export" (list(str)): Initial plan - images already exported ['2003-01', ...]
+    - "images_excluded" (list(dict)): Single exclusion reason [{month_: exclusion_str}]
+    - "images_to_export" (list(str)): Final export plan after exclusions
+    - "export_tasks" (ExportTaskList):  List of Tasks created from images_to_export
+
+    Args:
+        monthly_collection_path (str): Path to the monthly image collection (For existing and new images).
+        aoi_path (str): Path to a Feature Collection with the area of interest (AOI).
+        dem_path (str): Path to a digital elevation model (DEM) image.
+        name_prefix (str): Prefix for the exported image names.
+        months_list (list[str] | None): List of months to export (YYYY-MM format). If None, export all months not yet in target path.
+
+    Returns:
+        dict: Results of the monthly export process.
+    """
 
     logger.info("Starting Monthly Export Process")
 
-    # Fix name prefix if it doesn't end with "_" or "-"
-    if not name_prefix.endswith("_") and not name_prefix.endswith("-"):
-        name_prefix += "_"
+    # Fix name prefix
+    name_prefix = _fix_name_prefix(name_prefix)
 
     results_dict = {
         "frequency": "monthly",
-        "images_pending_export": [],  # aka original export plan
-        "images_excluded": [],
+        "initial_export_plan": [],  # aka expected dates ['2003-01', '2003-02', ...]
+        "images_pending_export": [],  # initial_plan - already_exported ['2003-01', ...]
+        "images_excluded": [],  # Single exclusion reason [{month_: exclusion_str}]
         "images_to_export": [],  # aka final export plan
-        "export_tasks": [],  # Should end with one task per final export plan
+        "export_tasks": ExportTaskList(),  #
     }
 
     # Get Terra and Aqua image collections, AOI and DEM image
@@ -303,6 +346,7 @@ def monthly_export_proc(
     logger.info(f"Images pending export: {images_pending_export}")
     results_dict["images_pending_export"].extend(images_pending_export)
 
+    # if no explicit list of months (month_list) was provided, assume all pending images was the starting point
     if months_list:
         excluded_existing = list(set(initial_export_plan) - set(images_pending_export))
         excluded_existing = [
@@ -312,17 +356,15 @@ def monthly_export_proc(
             logger.info(f"Images excluded: {excluded_existing}")
             results_dict["images_excluded"].extend(excluded_existing)
     else:
-        # if no explicit list of months (month_list) was provided, assume all pending images was the starting point
         initial_export_plan = list(
             set(initial_export_plan) - set(images_pending_export)
         )
 
+    results_dict["initial_export_plan"].extend(initial_export_plan)
+
     # Terminate early if no images pending of export
     if not images_pending_export:
         return results_dict
-
-    terra_image_dates = gee_dates.get_collection_dates(ee_terra_ic)
-    aqua_image_dates = gee_dates.get_collection_dates(ee_aqua_ic)
 
     # **********************************************
     # * EXCLUDE IMAGES NOT AVAILABLE IN TERRA/AQUA *
@@ -330,13 +372,10 @@ def monthly_export_proc(
 
     # Exclude if:
     # - Current month
-    # - Month not 'Complete' in both Terra/Aqua (no source available)
-    # - last available month is only 'Complete' in Terra/Aqua (Give time to pending source to catch up)
+    # - Month not 'Complete' in either Terra/Aqua (Give time to pending source to catch up)
 
-    # Images to export:
-    # - Are 'Complete' in either Terra or Aqua 'keep' lists
-    # - Are 'Complete' in Terra ('keep') but not in Aqua
-    # - Are 'Complete' in Aqua ('keep') but not in Terra
+    terra_image_dates = gee_dates.get_collection_dates(ee_terra_ic)
+    aqua_image_dates = gee_dates.get_collection_dates(ee_aqua_ic)
 
     t_availability_results = _check_months_are_complete(
         months=images_pending_export,
@@ -351,6 +390,7 @@ def monthly_export_proc(
         leading_days=leading_days,
     )
 
+    # Months that are 'complete'
     t_complete = [
         _month["month"]
         for _month in t_availability_results
@@ -362,6 +402,7 @@ def monthly_export_proc(
         if _month["status"] == "complete"
     ]
 
+    # Months that are pending completion
     t_pending_completion = [
         _month["month"]
         for _month in t_availability_results
@@ -421,8 +462,6 @@ def monthly_export_proc(
         # Terminate early if no images to export|
         return results_dict
 
-    # results_dict["images_to_export"] = images_to_export #! Redundant?
-
     # ***************************************
     # * FILTER TERRA/AQUA IMAGE COLLECTIONS *
     # ***************************************
@@ -457,7 +496,7 @@ def monthly_export_proc(
         ee_dem_img=ee_dem_img,
     )
 
-    # Calculate Monthly means. Using lambda func so we can pass additional arguments
+    # Calculate Monthly means for months of interest
     ee_monthly_imgs_list = ee.ee_list.List(images_to_export)
     ee_monthly_tac_ic = ee.imagecollection.ImageCollection.fromImages(
         ee_monthly_imgs_list.map(
@@ -466,44 +505,49 @@ def monthly_export_proc(
     )
 
     # Create list of Export tasks for monthly images
-    monthly_img_dates = gee_dates.get_collection_dates(ee_monthly_tac_ic)
+    # monthly_img_dates = gee_dates.get_collection_dates(ee_monthly_tac_ic)
+    monthly_img_dates = images_to_export
     monthly_img_dates.sort()
 
-    export_tasks = []
+    export_tasks = ExportTaskList()
     for month_ in monthly_img_dates:
         image_name = name_prefix + month_[0:7].replace("-", "_")
         try:
             ee_image = ee_monthly_tac_ic.filterDate(month_).first()
-            # ee_task = ee.batch.Export.image.toAsset(
-            #     image=ee_image,
-            #     description=image_name,
-            #     assetId=pathlib.Path(monthly_collection_path, image_name).as_posix(),
-            #     region=ee_aoi_fc,
-            #     scale=CHI_DEFAULT_SCALE,
-            #     crs=CHI_DEFAULT_PROJECTION,
-            #     max_pixels=180000000,
-            # )
-            ee_task = "mock_task"
-            export_tasks.append(
-                {
-                    "task": ee_task,
-                    "image": image_name,
-                    "target": "GEE Asset",
-                    "status": "mock_created",
-                }
+            ee_task = ee.batch.Export.image.toAsset(
+                image=ee_image,
+                description=image_name,
+                assetId=Path(monthly_collection_path, image_name).as_posix(),
+                region=ee_aoi_fc.geometry(),
+                scale=DEFAULT_SCALE,
+                crs=DEFAULT_CHI_PROJECTION,
+                maxPixels=180000000,
+            )
+            # Save to list of Tasks
+            export_tasks.add_task(
+                type="image",
+                name=image_name,
+                target="gee",
+                path=Path(monthly_collection_path),
+                task=ee_task,
+                # task_status="mock_created",
             )
             logger.debug(f"Export task created for image: {image_name}")
         except Exception as e:
-            export_tasks.append(
-                {
-                    "task": None,
-                    "image": image_name,
-                    "target": "GEE Asset",
-                    "status": "failed_to_create",
-                    "error": str(e),
-                }
+            export_tasks.add_task(
+                type="image",
+                name=image_name,
+                target="gee",
+                path=Path(monthly_collection_path),
+                task=None,
+                task_status="failed_to_create",
+                error=str(e),
             )
             logger.debug(f"Export task creation failed for image: {image_name}")
 
-    results_dict["export_tasks"] = export_tasks
+    # Start Tasks
+    logger.info(f"Export tasks created: {len(export_tasks)}")
+    export_tasks.start_exports()
+
+    results_dict["export_tasks"].extend(export_tasks)
     return results_dict

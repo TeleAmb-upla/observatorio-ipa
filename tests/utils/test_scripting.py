@@ -6,7 +6,7 @@ from datetime import datetime
 import pprint
 
 from observatorio_ipa.utils.messaging import EmailSender
-from observatorio_ipa.utils.scripting import (
+from observatorio_ipa.core.scripting import (
     check_required_config,
     check_required_email_config,
     check_required_assets,

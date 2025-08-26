@@ -1,13 +1,13 @@
 import pytest
 from datetime import date
 from pytest_mock import mocker
-from observatorio_ipa.processes.monthly_export import (
-    _create_ym_sequence,
+from observatorio_ipa.core.workflows.images.monthly_export import (
     _monthly_images_pending_export,
     _get_month_range_dates,
     _check_months_are_complete,
     _make_month_dates_seq,
 )
+from observatorio_ipa.utils.dates import create_ym_seq
 
 
 class TestCreateYmSequence:
@@ -15,43 +15,43 @@ class TestCreateYmSequence:
         start_date = date(2023, 1, 1)
         end_date = date(2023, 1, 31)
         expected = ["2023-01"]
-        assert _create_ym_sequence(start_date, end_date) == expected
+        assert create_ym_seq(start_date, end_date) == expected
 
     def test_multiple_months_same_year(self):
         start_date = date(2023, 1, 1)
         end_date = date(2023, 3, 31)
         expected = ["2023-01", "2023-02", "2023-03"]
-        assert _create_ym_sequence(start_date, end_date) == expected
+        assert create_ym_seq(start_date, end_date) == expected
 
     def test_multiple_years(self):
         start_date = date(2022, 11, 1)
         end_date = date(2023, 2, 28)
         expected = ["2022-11", "2022-12", "2023-01", "2023-02"]
-        assert _create_ym_sequence(start_date, end_date) == expected
+        assert create_ym_seq(start_date, end_date) == expected
 
     def test_start_date_after_end_date(self):
         start_date = date(2023, 3, 1)
         end_date = date(2023, 1, 31)
         expected = []
-        assert _create_ym_sequence(start_date, end_date) == expected
+        assert create_ym_seq(start_date, end_date) == expected
 
     def test_same_month_different_days(self):
         start_date = date(2023, 1, 1)
         end_date = date(2023, 1, 15)
         expected = ["2023-01"]
-        assert _create_ym_sequence(start_date, end_date) == expected
+        assert create_ym_seq(start_date, end_date) == expected
 
     def test_start_date_not_date_object(self):
         start_date = "2023-01-01"
         end_date = date(2023, 1, 31)
         with pytest.raises(AttributeError):
-            _create_ym_sequence(start_date, end_date)  # type: ignore
+            create_ym_seq(start_date, end_date)  # type: ignore
 
     def test_end_date_not_date_object(self):
         start_date = date(2023, 1, 1)
         end_date = "2023-01-31"
         with pytest.raises(AttributeError):
-            _create_ym_sequence(start_date, end_date)  # type: ignore
+            create_ym_seq(start_date, end_date)  # type: ignore
 
 
 class TestGetImagesPendingExport:

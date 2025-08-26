@@ -2,7 +2,7 @@ import os
 import json
 import pytest
 import pytest_gee
-from observatorio_ipa.defaults import (
+from observatorio_ipa.core.defaults import (
     DEFAULT_CHI_PROJECTION,
     DEFAULT_SCALE,
 )

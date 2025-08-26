@@ -68,10 +68,10 @@ class SCA_YM_BNA(common.BaseBasinStats):
         export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
         export_path (str): Path to export the results.
         table_prefix (str): Prefix for the table name.
+        storage_bucket (str | None): Google Cloud Storage bucket name. Required if export_target is 'storage'.
         basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
         exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
         max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
-        bucket (str | None): Cloud Storage bucket name. Required if export_target is 'storage'.
     """
 
     def __init__(
@@ -82,9 +82,10 @@ class SCA_YM_BNA(common.BaseBasinStats):
         export_target: str,
         export_path: str,  # "yearMonth_ee"
         table_prefix: str,  # "MCD_SCA_ym_BNA_" + cuenca
+        storage_bucket: str | None = None,
         basin_codes: list[str] | None = None,
+        exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,
-        bucket: str | None = None,
         **kwargs,
     ):
         # lazy argument passing. Consider moving to explicit arguments

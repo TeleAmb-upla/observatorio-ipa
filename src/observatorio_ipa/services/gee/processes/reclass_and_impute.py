@@ -41,6 +41,30 @@ def tac_reclass_and_impute(
     ee_aoi_fc: ee.featurecollection.FeatureCollection,
     ee_dem_img: ee.image.Image,
 ) -> ee.imagecollection.ImageCollection:
+    """Creates a joint Terra/Aqua ImageCollection to identify pixels covered by Snow
+    and imputes missing values from temporal and spatial neighbors.
+
+    Applies the following steps:
+    - Reclassifies landcover to identify snow covered pixels
+    - Combines Terra / Aqua
+    - Imputes values from Temporal series using leading and trailing images (+/-2)
+    - Imputes values from Spatial neighbors (4 directions)
+    - Imputes values from DEM (Digital Elevation Model) spatial neighbors (8 directions)
+
+    Returns daily images with the following bands:
+    - Cloud_TAC: Cloud mask with values (0, 100)
+    - Snow_TAC: Snow mask with values (0, 100)
+    - QA_CR: Integer that Indicates origin of TAC value (Original, Temporal Imputed, Spatial Imputed, etc)
+
+    Args:
+        ee_terra_ic (ee.imagecollection.ImageCollection): The Terra daily image collection.
+        ee_aqua_ic (ee.imagecollection.ImageCollection): The Aqua daily image collection.
+        ee_aoi_fc (ee.featurecollection.FeatureCollection): The area of interest feature collection.
+        ee_dem_img (ee.image.Image): The digital elevation model image.
+
+    Returns:
+        ee.imagecollection.ImageCollection: The reclassified and imputed image collection.
+    """
 
     # step 0: reclass snow landcover (Should keep all images in the collection)
     ee_terra_reclass_ic = binary.ic_snow_landcover_reclass(ee_terra_ic, ee_aoi_fc, 40)

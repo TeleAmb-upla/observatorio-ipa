@@ -1,5 +1,6 @@
 import ee
 import ee.batch
+import logging
 
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -7,6 +8,8 @@ from typing import Literal
 
 from observatorio_ipa.core.defaults import DEFAULT_SCALE, DEFAULT_CHI_PROJECTION
 from observatorio_ipa.services.gee.exports import ExportTaskList, VALID_EXPORT_TARGETS
+
+logger = logging.getLogger(__name__)
 
 
 #! Description of this function might be incorrect, need to better explain what the correction is
@@ -394,7 +397,7 @@ class BaseStats(ABC):
     task_list: ExportTaskList
     export_target: str
     export_path: str
-    bucket: str
+    storage_bucket: str | None
     bands_of_interest: list[str]
 
     @abstractmethod
@@ -404,7 +407,9 @@ class BaseStats(ABC):
     def make_exports(self) -> ExportTaskList:
 
         if not hasattr(self, "stats"):
-            print("No basin stats available. Please run calc_stats() first.")
+            warning_msg = "No basin stats available. Please run calc_stats() first."
+            print(warning_msg)
+            logger.warning(warning_msg)
             return ExportTaskList()
 
         max_exports = self.max_exports
@@ -416,7 +421,7 @@ class BaseStats(ABC):
             # Get stats for basin
             ee_stats_fc = stats_item["ee_stats_fc"]
             table_name = stats_item["table_name"]
-            print(f"Exporting Table: {table_name}")
+            logger.debug(f"Exporting Table: {table_name}")
             try:
                 match self.export_target:
                     case "gdrive":
@@ -444,7 +449,7 @@ class BaseStats(ABC):
                         task = ee.batch.Export.table.toCloudStorage(
                             collection=ee_stats_fc,
                             description=table_name,
-                            bucket=self.bucket,
+                            bucket=self.storage_bucket,
                             fileNamePrefix=storage_path.as_posix(),
                             fileFormat="CSV",
                         )
@@ -458,12 +463,12 @@ class BaseStats(ABC):
                     ),
                     target=self.export_target,
                     path=self.export_path,
-                    bucket=self.bucket,
+                    storage_bucket=self.storage_bucket,
                     task=task,
                 )
 
             except Exception as e:
-                print(f"Error exporting table {table_name}: {e}")
+                logger.error(f"Error exporting table {table_name}: {e}")
                 task_list.add_task(
                     type="table",
                     name=(
@@ -473,7 +478,7 @@ class BaseStats(ABC):
                     ),
                     target=self.export_target,
                     path=self.export_path,
-                    bucket=self.bucket,
+                    storage_bucket=self.storage_bucket,
                     error=str(e),
                 )
                 continue
@@ -489,7 +494,9 @@ class BaseStats(ABC):
     def start_exports(self) -> None:
         """Start all export tasks."""
         if not hasattr(self, "task_list"):
-            print("No tasks to start. Please run make_exports() first.")
+            warning_msg = "No tasks to start. Please run make_exports() first."
+            print(warning_msg)
+            logger.warning(warning_msg)
             return
 
         self.task_list.start_exports()
@@ -532,6 +539,7 @@ class BaseBasinStats(BaseStats):
         table_prefix: str,
         # ee_dem_img: ee.image.Image, # Removing from Base, not used in all processes
         bands_of_interest: list[str],
+        storage_bucket: str | None = None,
         basin_codes: list[str] | None = None,
         exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,
@@ -546,6 +554,7 @@ class BaseBasinStats(BaseStats):
         self.export_target = export_target
         self.export_path = export_path
         self.table_prefix = table_prefix
+        self.storage_bucket = storage_bucket
         self.basin_codes = basin_codes
         self.exclude_basin_codes = exclude_basin_codes
         self.max_exports = max_exports
@@ -568,7 +577,7 @@ class BaseBasinStats(BaseStats):
         if self.basin_codes:
             missing_basin_codes = set(self.basin_codes) - set(basin_code_list)
             if missing_basin_codes:
-                print(
+                logger.warning(
                     f"Warning: The following basin codes were not found in the collection: {missing_basin_codes}"
                 )
             basin_code_list = [
@@ -589,7 +598,7 @@ class BaseBasinStats(BaseStats):
         for basin_code in basin_code_list:
 
             table_name = f"{self.table_prefix}{basin_code}"
-            print(f"Processing basin: {basin_code}, Table Name: {table_name}")
+            logger.debug(f"Processing basin: {basin_code}, Table Name: {table_name}")
 
             try:
 
@@ -605,7 +614,7 @@ class BaseBasinStats(BaseStats):
                 self.stats.append(stats_dict)
 
             except Exception as e:
-                print(f"Error processing table {table_name}: {e}")
+                logger.error(f"Error processing table {table_name}: {e}")
                 continue
             finally:
                 max_exports -= 1
@@ -627,6 +636,7 @@ class BaseNationalStats(BaseStats):
         export_path: str,
         table_name: str,
         # ee_dem_img: ee.image.Image, # Removing from Base, not used in all processes
+        storage_bucket: str | None = None,
         basin_codes: list[str] | None = None,
         exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,
@@ -642,6 +652,7 @@ class BaseNationalStats(BaseStats):
         self.export_target = export_target
         self.export_path = export_path
         self.table_name = table_name
+        self.storage_bucket = storage_bucket
         self.basin_codes = basin_codes
         self.exclude_basin_codes = exclude_basin_codes
         self.max_exports = max_exports
@@ -666,8 +677,8 @@ class BaseNationalStats(BaseStats):
         if self.basin_codes:
             missing_basin_codes = set(self.basin_codes) - set(basin_code_list)
             if missing_basin_codes:
-                print(
-                    f"Warning: The following basin codes were not found in the collection: {missing_basin_codes}"
+                logger.warning(
+                    f"The following basin codes were not found in the collection: {missing_basin_codes}"
                 )
             basin_code_list = [
                 code for code in basin_code_list if code in self.basin_codes
@@ -680,7 +691,7 @@ class BaseNationalStats(BaseStats):
             ]
 
         table_name = self.table_name
-        print(f"Processing {table_name}")
+        logger.debug(f"Processing {table_name}")
 
         try:
             # Filter FC to Basin Codes
@@ -701,7 +712,7 @@ class BaseNationalStats(BaseStats):
             }
 
         except Exception as e:
-            print(f"Error processing table {table_name}: {e}")
+            logger.error(f"Error processing table {table_name}: {e}")
 
         self.stats: list[dict] = [stats_dict]
 
@@ -709,7 +720,7 @@ class BaseNationalStats(BaseStats):
         return
 
 
-# TOODO: Verify Export Tasks, add options to Drive/Storage
+# TODO: Verify Export Tasks, add options to Drive/Storage
 class BaseBasinRasters(ABC):
 
     max_exports: int | None
@@ -719,7 +730,7 @@ class BaseBasinRasters(ABC):
     task_list: ExportTaskList
     export_target: str
     export_path: str
-    bucket: str | None
+    storage_bucket: str | None
     bands_of_interest: list[str]
 
     def __init__(
@@ -730,10 +741,10 @@ class BaseBasinRasters(ABC):
         export_target: str,
         export_path: str,
         img_prefix: str,
+        storage_bucket: str | None = None,
         basin_codes: list[str] | None = None,
         exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,
-        bucket: str | None = None,
         **kwargs,
     ) -> None:
         if export_target not in VALID_EXPORT_TARGETS:
@@ -743,7 +754,7 @@ class BaseBasinRasters(ABC):
         self.basins_cd_property = basins_cd_property
         self.export_target = export_target
         self.export_path = export_path
-        self.bucket = bucket
+        self.storage_bucket = storage_bucket
         self.img_prefix = img_prefix
         self.basin_codes = basin_codes
         self.exclude_basin_codes = exclude_basin_codes
@@ -763,8 +774,8 @@ class BaseBasinRasters(ABC):
         if self.basin_codes:
             missing_basin_codes = set(self.basin_codes) - set(basin_code_list)
             if missing_basin_codes:
-                print(
-                    f"Warning: The following basin codes were not found in the collection: {missing_basin_codes}"
+                logger.warning(
+                    f"The following basin codes were not found in the collection: {missing_basin_codes}"
                 )
             basin_code_list = [
                 code for code in basin_code_list if code in self.basin_codes
@@ -784,7 +795,7 @@ class BaseBasinRasters(ABC):
         for basin_code in basin_code_list:
 
             img_name = f"{self.img_prefix}{basin_code}"
-            print(f"Processing basin: {basin_code}, Image Name: {img_name}")
+            logger.debug(f"Processing basin: {basin_code}, Image Name: {img_name}")
 
             try:
                 # ----- Basin Split logic -----
@@ -811,7 +822,7 @@ class BaseBasinRasters(ABC):
                 self.rasters.append(raster_dict)
 
             except Exception as e:
-                print(f"Error processing image {img_name}: {e}")
+                logger.error(f"Error processing image {img_name}: {e}")
                 continue
             finally:
                 max_exports -= 1
@@ -871,6 +882,7 @@ class BaseBasinRasters(ABC):
                     type="image",
                     name=img_name,
                     target=self.export_target,
+                    storage_bucket=self.storage_bucket,
                     path=self.export_path,
                     task=task,
                 )
@@ -881,6 +893,7 @@ class BaseBasinRasters(ABC):
                     type="image",
                     name=img_name,
                     target=self.export_target,
+                    storage_bucket=self.storage_bucket,
                     path=self.export_path,
                     error=str(e),
                 )

@@ -53,4 +53,5 @@
     "python.analysis.extraPaths": [
         "./src"
     ],
+    "python-envs.pythonProjects": [],
 }

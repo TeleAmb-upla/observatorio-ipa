@@ -1,0 +1,87 @@
+[app.google]
+credentials_file = "path/to/credentials.json"
+
+[app.email]
+enable_email = true
+host = "smtp.example.com"
+port = 587
+user = "user@example.com"
+password = "password"
+from_address = "from@example.com"
+to_address = ["to@example.com"]
+
+[app.logging]
+name = "osn-ipa"
+level = "INFO"
+file = "logs/app.log"
+encoding = "utf-8"
+format = "%(asctime)s %(name)s %(levelname)s: %(message)s"
+date_format = "%Y-%m-%d %H:%M:%S"
+
+[app.image_export]
+monthly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly_Monthly"
+monthly_image_prefix = "Andes_MCDS4S5_Yearly_Monthly"
+yearly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly"
+yearly_image_prefix = "Andes_MCDS4S5_Yearly"
+aoi_asset_path = "projects/ee-observatorionieves/assets/Modules/Andes"
+dem_asset_path = "projects/ee-observatorionieves/assets/Modules/DEM_SRTM_reproj_MODIS_463_Andes"
+# days_list = []
+# months_list = []
+# years_list = []
+
+[app.stats_export]
+basins_asset_path = "users/observatorionieves/DGA/Cuencas_BNA_Oficial"
+macrozones_asset_path = "users/observatorionieves/DGA/Macrozonas_BNA_Oficial"
+basins_cd_property = "COD_CUEN"
+dem_asset_path = "users/observatorionieves/DEM/DEM_SRTM_reproj_Landsat_100_Andes"
+salar_mask_asset_path = "projects/ee-observatorionieves/assets/Vectores/Salar_mask"
+snow_persistence_asset_path = "users/observatorionieves/MODIS/MCD10A1_Andes_T48_Summary/MCD10A1_Andes_T48_Summary_SP"
+snow_persistence_trend_asset_path = "users/observatorionieves/MODIS/MCD10A1_Andes_T48_Summary/MCD10A1_Andes_T48_Summary_ST"
+
+# ----- Stats Common Output Config -----
+export_target = "storage"
+storage_bucket = "project-bucket"
+base_export_path = "OSN/stats/"
+# basin_codes = ['023', '024', '030']
+# exclude_basin_codes = None
+# max_exports = None
+common_tbl_pre_prefix = "MCD"
+
+# ----- Elevation Output -----
+elevation_tbl_export_path = "elev_ee"
+elev_basin_tbl_prefix = "elev_BNA_"
+sca_elev_basin_tbl_prefix = "SCA_elev_BNA_"
+
+# ----- Month (across-years) Statistics Output -----
+month_tbl_export_path = "month_ee"
+sca_m_basin_tbl_prefix = "SCA_m_BNA_"
+sca_m_elev_basin_tbl_prefix = "SCA_m_elev_BNA_"
+sca_m_trend_basin_tbl_prefix = "SCA_m_trend_BNA_"
+
+# ----- Monthly (year/month) Statistics Output -----
+year_month_tbl_export_path = "yearMonth_ee"
+sca_y_m_basin_tbl_prefix = "SCA_y_m_BNA_"
+sca_ym_basin_tbl_prefix = "SCA_ym_BNA_"
+sca_ym_elev_basin_tbl_prefix = "SCA_ym_elev_BNA_"
+snowline_ym_basin_tbl_prefix = "snowline_ym_BNA_"
+
+# ----- Yearly Statistics Output -----
+year_tbl_export_path = "year_ee"
+sca_y_basin_tbl_prefix = "SCA_y_BNA_"
+sca_y_elev_basin_tbl_prefix = "SCA_y_elev_BNA_"
+sca_y_t_area_basin_tbl_prefix = "SCA_y_t_area_BNA_"
+sca_y_t_elev_basin_tbl_prefix = "SCA_y_t_elev_BNA_"
+snowline_y_basin_tbl_prefix = "snowline_y_BNA_"
+
+# ----- stats manifest -----
+manifest_source = "file"        # file or storage
+manifest_path = "../manifests/"
+
+[app.automation.db]
+db_path = "path/to/observatorio_ipa.db"
+
+[app.automation.daily_job]
+cron = "0 2 * * *"
+
+[app.automation.orchestration_job]
+cron = "0 3 * * *"

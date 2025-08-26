@@ -1,11 +1,11 @@
 import os
 import pytest
-from observatorio_ipa.utils.command_line import set_argument_parser
+from observatorio_ipa.core.cli import parse_cli_args
 
 
 class TestSetArgumentParser:
     def setup_method(self):
-        self.parser = set_argument_parser()
+        self.parser = parse_cli_args()
 
     def test_default_values_from_env(self, mocker):
         mocker.patch.dict(
@@ -37,7 +37,7 @@ class TestSetArgumentParser:
             },
         )
 
-        parser = set_argument_parser()
+        parser = parse_cli_args()
 
         args = parser.parse_args([])
 
@@ -169,7 +169,7 @@ class TestSetArgumentParser:
                 "OSN_SMTP_TO": "to@test.com",
             },
         )
-        parser = set_argument_parser()
+        parser = parse_cli_args()
 
         args = parser.parse_args(
             [
@@ -277,7 +277,7 @@ class TestSetArgumentParser:
 
     def test_enable_email_accepts_nonBool(self, mocker):
         mocker.patch.dict(os.environ, {"OSN_ENABLE_EMAIL": "NotABool"})
-        parser = set_argument_parser()
+        parser = parse_cli_args()
         args = parser.parse_args([])
         assert args.enable_email == "NotABool"
 
@@ -303,12 +303,12 @@ class TestSetArgumentParser:
 
     def test_valid_env_str_smtp_port(self, mocker):
         mocker.patch.dict(os.environ, {"OSN_SMTP_PORT": "587"})
-        parser = set_argument_parser()
+        parser = parse_cli_args()
         args = parser.parse_args([])
         assert args.smtp_port == 587
 
     def test_invalid_env_str_smtp_port(self, mocker):
         mocker.patch.dict(os.environ, {"OSN_SMTP_PORT": "INVALID"})
-        parser = set_argument_parser()
+        parser = parse_cli_args()
         with pytest.raises(SystemExit):
             parser.parse_args([])

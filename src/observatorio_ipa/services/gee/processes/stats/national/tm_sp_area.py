@@ -156,6 +156,7 @@ class TM_SP_Area(common.BaseNationalStats):
         export_target: str,
         export_path: str,  # "total_ee"
         table_name: str,  # "MCD_tm_SP_area"
+        storage_bucket: str | None = None,
         basin_codes: list[str] | None = None,
         exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,

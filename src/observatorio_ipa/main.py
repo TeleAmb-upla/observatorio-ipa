@@ -1,14 +1,17 @@
 import sys
 
-from observatorio_ipa.core.workflows import monthly_export
 
-from .core.config import Settings, EmailSettings, LogSettings, LOGGER_NAME
+from observatorio_ipa.core.config import (
+    Settings,
+    EmailSettings,
+    LogSettings,
+    LOGGER_NAME,
+)
+from observatorio_ipa.core.workflows.images import monthly_export  # , yearly_export
 from observatorio_ipa.services.gee import exports as gee_exports
-from observatorio_ipa.core.workflows import yearly_export
-from observatorio_ipa.utils import logs
 from observatorio_ipa.core import cli
 from observatorio_ipa.core import scripting
-from observatorio_ipa.utils import messaging
+from observatorio_ipa.utils import messaging, db, logs
 from .services.messaging import EmailService
 from .services import connections
 from .core.workflows import wflows_connections
@@ -169,10 +172,11 @@ def main():
         raise e
 
     ## ------ EXPORT MONTHLY IMAGES ---------
+    # TODO: Monthly export will always happen. Remove the IF
     export_tasks = []
     export_results = ""
     if runtime_settings.monthly_assets_path:
-        monthly_export_results = monthly_export.monthly_export_proc(
+        monthly_export_results = monthly_export.monthly_img_export_proc(
             monthly_collection_path=runtime_settings.monthly_assets_path.as_posix(),
             name_prefix=runtime_settings.monthly_image_prefix,
             aoi_path=runtime_settings.aoi_asset_path.as_posix(),

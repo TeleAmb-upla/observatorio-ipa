@@ -254,7 +254,6 @@ def _ee_calc_basin_area_per_elev_bin(
 
 
 class Elev_BNA(common.BaseBasinStats):
-
     """Class to calculate and export Area per elevation range per basin.
 
     Args:
@@ -264,9 +263,12 @@ class Elev_BNA(common.BaseBasinStats):
         export_target (str): Target where results will be exported. Options: 'gdrive', 'gee', 'storage'.
         export_path (str): Path to export the results.
         table_prefix (str): Prefix for the table name.
+        storage_bucket (str | None): Google Cloud Storage bucket name. Required if export_target is 'storage'.
         basin_codes (list[str] | None): List of basin codes to process. If None, all basins will be processed.
+        exclude_basin_codes (list[str] | None): List of basin codes to exclude from processing. If None, no basins will be excluded.
         max_exports (int | None): Maximum number of export tasks to run. If None, no limit is applied.
     """
+
     def __init__(
         self,
         ee_basins_fc: ee.featurecollection.FeatureCollection,
@@ -275,21 +277,23 @@ class Elev_BNA(common.BaseBasinStats):
         export_target: str,
         export_path: str,  # "elev_ee"
         table_prefix: str,  # "MCD_elev_BNA_" + cuenca
+        storage_bucket: str | None = None,
         basin_codes: list[str] | None = None,
+        exclude_basin_codes: list[str] | None = None,
         max_exports: int | None = None,
         **kwargs,
     ):
         # lazy argument passing. Consider moving to explicit arguments
-        args = {k: v for k, v in locals().items() if k != "self"}
-
+        kwargs = {k: v for k, v in locals().items() if k != "self"}
         # Dummy image collection to avoid error in parent init
-        ee_icollection = ee.imagecollection.ImageCollection()
-
+        ee_icollection = ee.imagecollection.ImageCollection([])
+        self.ee_dem_img = ee_dem_img
         bands_of_interest = ["Elevation", "Area"]
         super().__init__(
-            bands_of_interest=bands_of_interest, ee_icollection=ee_icollection, **args
+            ee_icollection=ee_icollection,
+            bands_of_interest=bands_of_interest,
+            **kwargs,
         )
-        self.ee_dem_img = ee_dem_img
 
     def stats_proc(self, basin_code) -> ee.featurecollection.FeatureCollection:
         # Implement snowline calculation logic here

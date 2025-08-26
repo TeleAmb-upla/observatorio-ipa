@@ -1,5 +1,7 @@
 import pytest
-from observatorio_ipa.processes.monthly_export import monthly_export_proc
+from observatorio_ipa.core.workflows.images.monthly_export import (
+    monthly_img_export_proc,
+)
 
 
 class TestMonthlyExportProc:
@@ -21,7 +23,7 @@ class TestMonthlyExportProc:
             return_value=[],
         )
 
-        result = monthly_export_proc(
+        result = monthly_img_export_proc(
             monthly_collection_path="path/to/collection",
             aoi_path="path/to/aoi",
             dem_path="path/to/dem",
@@ -75,7 +77,7 @@ class TestMonthlyExportProc:
             "observatorio_ipa.processes.monthly_export.ee.imagecollection.ImageCollection.fromImages"
         )
 
-        result = monthly_export_proc(
+        result = monthly_img_export_proc(
             monthly_collection_path="path/to/collection",
             aoi_path="path/to/aoi",
             dem_path="path/to/dem",
@@ -131,7 +133,7 @@ class TestMonthlyExportProc:
         #     "observatorio_ipa.processes.monthly_export.ee.imagecollection.ImageCollection.fromImages"
         # )
 
-        result = monthly_export_proc(
+        result = monthly_img_export_proc(
             monthly_collection_path="path/to/collection",
             aoi_path="path/to/aoi",
             dem_path="path/to/dem",
@@ -213,7 +215,7 @@ class TestMonthlyExportProc:
             return_value=mock_ee_imagecollection,
         )
 
-        result = monthly_export_proc(
+        result = monthly_img_export_proc(
             monthly_collection_path="path/to/collection",
             aoi_path="path/to/aoi",
             dem_path="path/to/dem",

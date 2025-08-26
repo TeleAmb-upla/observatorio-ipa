@@ -7,7 +7,7 @@ from ee.ee_exception import EEException
 
 from observatorio_ipa.processes.binary import (
     ic_snow_landcover_reclass,
-    img_snow_landcover_reclass,
+    ee_img_snow_landcover_reclass,
 )
 
 
@@ -77,17 +77,17 @@ class TestImgSnowLandcoverReclass:
     @pytest.mark.gee
     def test_ee_img_not_image(self):
         with pytest.raises(TypeError):
-            img_snow_landcover_reclass(ee.imagecollection.ImageCollection([]), 40)  # type: ignore
+            ee_img_snow_landcover_reclass(ee.imagecollection.ImageCollection([]), 40)  # type: ignore
 
     @pytest.mark.gee
     def test_threshold_ndsi_not_int(self, mock_cloudy_image):
         with pytest.raises(TypeError):
-            img_snow_landcover_reclass(mock_cloudy_image, "40")  # type: ignore
+            ee_img_snow_landcover_reclass(mock_cloudy_image, "40")  # type: ignore
 
     @pytest.mark.gee
     def test_missing_band(self, mock_missing_band_image):
         with pytest.raises(EEException):
-            ee_result_img = img_snow_landcover_reclass(mock_missing_band_image, 40)
+            ee_result_img = ee_img_snow_landcover_reclass(mock_missing_band_image, 40)
             bands = ee_result_img.bandNames().getInfo()  # Needed to force an action
 
     @pytest.mark.gee
@@ -96,7 +96,7 @@ class TestImgSnowLandcoverReclass:
     ):
 
         # Call the function with the mock data
-        ee_result_img = img_snow_landcover_reclass(mock_land_image, 40)
+        ee_result_img = ee_img_snow_landcover_reclass(mock_land_image, 40)
         band_names = ee_result_img.bandNames().getInfo()
 
         # Assert the expected results
@@ -131,7 +131,7 @@ class TestImgSnowLandcoverReclass:
     ):
 
         # Call the function with the mock data
-        ee_result_img = img_snow_landcover_reclass(mock_snow_image, 40)
+        ee_result_img = ee_img_snow_landcover_reclass(mock_snow_image, 40)
 
         assert (
             ee_result_img.get("Threshold_NDSI").getInfo() == 40
@@ -159,7 +159,7 @@ class TestImgSnowLandcoverReclass:
     ):
 
         # Call the function with the mock data
-        ee_result_img = img_snow_landcover_reclass(mock_cloudy_image, 40)
+        ee_result_img = ee_img_snow_landcover_reclass(mock_cloudy_image, 40)
         assert (
             ee_result_img.get("Threshold_NDSI").getInfo() == 40
         ), "Threshold_NDSI property should be set to 40"
