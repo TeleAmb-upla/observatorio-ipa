@@ -2,18 +2,19 @@
 credentials_file = "path/to/credentials.json"
 
 [app.email]
-enable_email = true
-host = "smtp.example.com"
-port = 587
-user = "user@example.com"
-password = "password"
-from_address = "from@example.com"
-to_address = ["to@example.com"]
+enable_email = false
+# host = "smtp.example.com"
+# port = 587
+# user = "user@example.com"
+# password = "password"
+# password_file = "password.txt"
+# from_address = "from@example.com"
+# to_address = ["to@example.com"]
 
 [app.logging]
 name = "osn-ipa"
 level = "INFO"
-file = "logs/app.log"
+file = "logs/osn_ipa.log"
 encoding = "utf-8"
 format = "%(asctime)s %(name)s %(levelname)s: %(message)s"
 date_format = "%Y-%m-%d %H:%M:%S"
@@ -30,6 +31,8 @@ dem_asset_path = "projects/ee-observatorionieves/assets/Modules/DEM_SRTM_reproj_
 # years_list = []
 
 [app.stats_export]
+# monthly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly_Monthly"
+# yearly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly"
 basins_asset_path = "users/observatorionieves/DGA/Cuencas_BNA_Oficial"
 macrozones_asset_path = "users/observatorionieves/DGA/Macrozonas_BNA_Oficial"
 basins_cd_property = "COD_CUEN"
@@ -48,17 +51,20 @@ base_export_path = "OSN/stats/"
 common_tbl_pre_prefix = "MCD"
 
 # ----- Elevation Output -----
+elevation_stats = true
 elevation_tbl_export_path = "elev_ee"
 elev_basin_tbl_prefix = "elev_BNA_"
 sca_elev_basin_tbl_prefix = "SCA_elev_BNA_"
 
 # ----- Month (across-years) Statistics Output -----
+month_stats = true
 month_tbl_export_path = "month_ee"
 sca_m_basin_tbl_prefix = "SCA_m_BNA_"
 sca_m_elev_basin_tbl_prefix = "SCA_m_elev_BNA_"
 sca_m_trend_basin_tbl_prefix = "SCA_m_trend_BNA_"
 
 # ----- Monthly (year/month) Statistics Output -----
+monthly_stats = true
 year_month_tbl_export_path = "yearMonth_ee"
 sca_y_m_basin_tbl_prefix = "SCA_y_m_BNA_"
 sca_ym_basin_tbl_prefix = "SCA_ym_BNA_"
@@ -66,6 +72,7 @@ sca_ym_elev_basin_tbl_prefix = "SCA_ym_elev_BNA_"
 snowline_ym_basin_tbl_prefix = "snowline_ym_BNA_"
 
 # ----- Yearly Statistics Output -----
+yearly_stats = true
 year_tbl_export_path = "year_ee"
 sca_y_basin_tbl_prefix = "SCA_y_BNA_"
 sca_y_elev_basin_tbl_prefix = "SCA_y_elev_BNA_"
@@ -76,6 +83,7 @@ snowline_y_basin_tbl_prefix = "snowline_y_BNA_"
 # ----- stats manifest -----
 manifest_source = "file"        # file or storage
 manifest_path = "../manifests/"
+skip_manifest = false
 
 [app.automation.db]
 db_path = "path/to/observatorio_ipa.db"

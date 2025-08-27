@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
     field_validator,
+    model_validator,
     ValidationError,
     BeforeValidator,
     ValidatorFunctionWrapHandler,
@@ -42,16 +43,21 @@ YearStr = Annotated[
 def value_from_file(file_path: str | Path | None) -> str | None:
     if not file_path:
         return None
-    file_path_ = Path(file_path)
+    file_path_ = Path(file_path)  # Ensure file_path is a Path object
     with open(file_path_, "r") as f:
         return f.read().strip()
 
 
-def parse_str_list(value):
-    if isinstance(value, str):
+def parse_str_list(value: str | list | None) -> list | None:
+    if value is None:
+        return None
+    elif isinstance(value, str):
         # Split by commas, trim whitespace, filter out empty strings
         return [_item.strip() for _item in value.split(",") if _item.strip()]
-    return value
+    elif isinstance(value, list):
+        return value
+    else:
+        raise ValueError(f"Expected a string or list, got {type(value).__name__}")
 
 
 # TODO: Verify if Server is a valid ipv4 or a hostname, return the string of either one
@@ -75,9 +81,30 @@ class EmailSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def check_required_if_enabled(self):
+        if self.enable_email:
+            missing = []
+            if not self.user:
+                missing.append("user")
+            if not self.password:
+                missing.append("password")
+            if not self.from_address:
+                missing.append("from_address")
+            if not self.to_address:
+                missing.append("to_address")
+            if missing:
+                raise ValueError(
+                    f"When enable_email is True, the following fields must be set: {', '.join(missing)}"
+                )
+        return self
+
     enable_email: bool = False
-    host: str
-    port: Annotated[int, Field(gt=0, lt=65536)]  # Port must be between 1 and 65535
+    host: Annotated[str | None, Field(description="SMTP server host")] = None
+    port: Annotated[
+        int | None, Field(gt=0, lt=65536, description="SMTP server port")
+    ] = None  # Port must be between 1 and 65535
     user_file: Annotated[
         FilePath | None,
         Field(description="Optional file path for SMTP user"),
@@ -95,16 +122,20 @@ class EmailSettings(BaseSettings):
     ] = None
     password: SecretStr | None = Field(
         validate_default=True,
-        default_factory=lambda data: value_from_file(data["password_file"]),
+        default_factory=lambda data: SecretStr(
+            value_from_file(data["password_file"]) or ""
+        ),
         min_length=1,
-        description="SMTP password, can be read from a file",
-    )  # type: ignore
-    from_address: EmailStr
+        description="SMTP password. Can also be read from a file with 'password_file' option",
+    )
+    from_address: Annotated[
+        EmailStr | None, Field(description="Sender email address")
+    ] = None
     to_address: Annotated[
-        list[EmailStr],
+        list[EmailStr] | None,
         BeforeValidator(parse_str_list),
         Field(description="List of email addresses to send to"),
-    ]
+    ] = None
 
 
 class LogSettings(BaseSettings):
@@ -112,13 +143,15 @@ class LogSettings(BaseSettings):
         extra="ignore",
     )
 
-    name: Annotated[str, Field(default=LOGGER_NAME, validation_alias="")]
+    name: Annotated[str, Field(validation_alias="")] = LOGGER_NAME
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    file: Path = Field(
-        default=Path("./osn_ipa.log"),
-        validation_alias="",
-        description="Path to the log file",
-    )
+    file: Annotated[
+        Path,
+        Field(
+            validation_alias="",
+            description="Path to the log file",
+        ),
+    ] = Path("./osn_ipa.log")
     encoding: Annotated[str, Field(default="utf-8", validation_alias="")]
     format: Annotated[
         str,
@@ -131,25 +164,61 @@ class LogSettings(BaseSettings):
 
 
 class ImageExportSettings(BaseSettings):
+    # @model_validator(mode="after")
+    # def check_days_or_months(self):
+    #     days = getattr(self, "days_list", None)
+    #     months = getattr(self, "months_list", None)
+    #     # Add years_list if/when implemented
+    #     if (not days or len(days) == 0) and (not months or len(months) == 0):
+    #         raise ValueError(
+    #             "At least one of 'days_list' or 'months_list' must be provided and not empty in ImageExportSettings."
+    #         )
+    #     return self
+
     model_config = SettingsConfigDict(
         extra="ignore",
     )
 
     # Image Collections (Used for both Input and Output)
+    daily_collection_path: Annotated[
+        Path | None,
+        Field(
+            description="Path to Image Collection with daily images",
+        ),
+    ] = None
+    daily_image_prefix: Annotated[
+        str | None,
+        Field(
+            description="Prefix for daily images. Final image name will be <prefix>_<date>"
+        ),
+    ] = None
+
     monthly_collection_path: Annotated[
-        Path,
+        Path | None,
         Field(
             description="Path to Image Collection with monthly images",
         ),
-    ]
-    monthly_image_prefix: str
+    ] = None
+    monthly_image_prefix: Annotated[
+        str | None,
+        Field(
+            description="Prefix for monthly images. Final image name will be <prefix>_<date>"
+        ),
+    ] = None
+
     yearly_collection_path: Annotated[
-        Path,
+        Path | None,
         Field(
             description="Path to Image Collection with yearly images",
         ),
-    ]
-    yearly_image_prefix: str
+    ] = None
+    yearly_image_prefix: Annotated[
+        str | None,
+        Field(
+            description="Prefix for yearly images. Final image name will be <prefix>_<year>"
+        ),
+    ] = None
+
     aoi_asset_path: Annotated[
         Path,
         Field(
@@ -162,31 +231,35 @@ class ImageExportSettings(BaseSettings):
             description="Path to Image with Digital Elevation Model (DEM)",
         ),
     ]
+
     # Custom lists to export
     days_list: Annotated[
         list[date] | None,
         BeforeValidator(parse_str_list),
-        Field(description="List of days to export"),
+        Field(description="Explicit list of days to export (format: ['YYYY-MM-DD'])"),
     ] = None
 
     months_list: Annotated[
         list[YearMonthStr] | None,
         BeforeValidator(parse_str_list),
-        Field(description="List of months to export (format: YYYY-MM)"),
+        Field(description="Explicit list of months to export (format: ['YYYY-MM'])"),
     ] = None
 
     years_list: Annotated[
         list[YearStr] | None,
         BeforeValidator(parse_str_list),
-        Field(description="List of years to export"),
+        Field(description="Explicit list of years to export (format: ['YYYY'])"),
     ] = None
 
 
+# TODO: Make month, monthly, yearly exports optional in case we want to rerun specific types only
 class StatsExportSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
     )
     # ----- Input Assets ------
+    monthly_collection_path: Path
+    yearly_collection_path: Path
     basins_asset_path: Path
     macrozones_asset_path: Path
     basins_cd_property: str
@@ -199,23 +272,37 @@ class StatsExportSettings(BaseSettings):
     export_target: str
     storage_bucket: str | None
     base_export_path: Path
-    basin_codes: list[str] | None = None
-    exclude_basin_codes: list[str] | None = None
-    max_exports: int | None = None
-    common_tbl_pre_prefix: str | None = None
+    basin_codes: Annotated[
+        list[str] | None, Field(description="Explicit list of basin codes to export")
+    ] = None
+    exclude_basin_codes: Annotated[
+        list[str] | None, Field(description="Explicit list of basin codes to exclude")
+    ] = None
+    max_exports: Annotated[
+        int | None, Field(description="Maximum number of exports per job")
+    ] = None
+    common_tbl_pre_prefix: Annotated[
+        str | None,
+        Field(
+            description="A common prefix for all table exports. precedes specific table prefix. e.g '<common_prefix>_<prefix>_<table_name>.csv'"
+        ),
+    ] = None
 
     # ----- Elevation Output -----
+    elevation_stats: bool = True
     elevation_tbl_export_path: Path
     elev_basin_tbl_prefix: str
     sca_elev_basin_tbl_prefix: str
 
     # ----- Month (across-years) Statistics Output -----
+    month_stats: bool = True
     month_tbl_export_path: Path
     sca_m_basin_tbl_prefix: str
     sca_m_elev_basin_tbl_prefix: str
     sca_m_trend_basin_tbl_prefix: str
 
     # ----- Monthly (year/month) Statistics Output -----
+    monthly_stats: bool = True
     year_month_tbl_export_path: Path
     sca_y_m_basin_tbl_prefix: str
     sca_ym_basin_tbl_prefix: str
@@ -223,6 +310,7 @@ class StatsExportSettings(BaseSettings):
     snowline_ym_basin_tbl_prefix: str
 
     # ----- Yearly Statistics Output -----
+    yearly_stats: bool = True
     year_tbl_export_path: Path
     sca_y_basin_tbl_prefix: str
     sca_y_elev_basin_tbl_prefix: str
@@ -233,8 +321,10 @@ class StatsExportSettings(BaseSettings):
     # ----- stats manifest -----
     manifest_source: str
     manifest_path: Path
+    skip_manifest: bool = False
 
 
+# TODO: Make AutoRun settings optional, in case same initializer is used for manual run
 class AutoDBSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
@@ -269,6 +359,67 @@ class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_stats_collection_paths(cls, values: Any) -> Any:
+        if not isinstance(values, dict):
+            print("Not a dictionary")
+            return values
+
+        print(values)
+
+        if values.get("app"):
+            image_export = values["app"].get("image_export")
+            stats_export = values["app"].get("stats_export")
+        else:
+            image_export = values.get("image_export")
+            stats_export = values.get("stats_export")
+
+        # Only set if stats_export exists and monthly_collection_path is missing or None
+        if image_export and stats_export:
+            print("Both image_export and stats_export exist")
+            print(
+                f"Image Monthly Collection: {image_export.get('monthly_collection_path')}"
+            )
+            print(
+                f"Stats Monthly Collection: {stats_export.get('monthly_collection_path')}"
+            )
+            print(
+                f"Image Yearly Collection: {image_export.get('yearly_collection_path')}"
+            )
+            print(
+                f"Stats Yearly Collection: {stats_export.get('yearly_collection_path')}"
+            )
+            print(image_export)
+            print(stats_export)
+
+            # Copy Monthly Collection Path
+            if (
+                stats_export.get("monthly_collection_path") is None
+                and image_export.get("monthly_collection_path") is not None
+            ):
+                print(
+                    "Copying monthly_collection_path from image_export to stats_export"
+                )
+                stats_export["monthly_collection_path"] = image_export[
+                    "monthly_collection_path"
+                ]
+
+            # Copy Yearly Collection Path
+            if (
+                stats_export.get("yearly_collection_path") is None
+                and image_export.get("yearly_collection_path") is not None
+            ):
+                print(
+                    "Copying yearly_collection_path from image_export to stats_export"
+                )
+                stats_export["yearly_collection_path"] = image_export[
+                    "yearly_collection_path"
+                ]
+        print(values)
+        return values
+
     google: GoogleSettings
     email: EmailSettings
     logging: LogSettings
@@ -298,7 +449,7 @@ class Settings(BaseSettings):
     #     env_file = ".env"
 
 
-def _deep_merge_dicts(a: dict, b: dict) -> dict:
+def _deep_merge_dicts(a: dict, b: Mapping) -> dict:
     """Recursively merge dict b into dict a (b has precedence)."""
     result = copy.deepcopy(a)
     for k, v in b.items():
@@ -317,7 +468,7 @@ def load_settings_from_toml(toml_path: str | Path) -> "Settings":
     with open(toml_path_, "rb") as f:
         user_data = tomllib.load(f)
     merged_data = _deep_merge_dicts(default_data, user_data)
-    return Settings(**merged_data)
+    return Settings(**merged_data)  # Return the merged settings
 
 
 # settings = Settings()
