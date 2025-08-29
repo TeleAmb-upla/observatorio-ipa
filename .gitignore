@@ -165,3 +165,5 @@ poetry.lock
 **/deprecated/
 configs/
 support_docs/
+db/
+manifests/
