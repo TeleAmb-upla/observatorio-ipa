@@ -1,0 +1,68 @@
+Status: {{ job_status }}
+Job ID: {{ id }}
+Start Time: {{ created_at }}
+
+{%- if error %}
+Errors: 
+{%- for err in error %}
+- {{ err }}
+{%- endfor %}
+{% endif %}
+----------------------------------------------------------------------------
+Images Exported:
+{%- if export_tasks.image %}
+{%- for path, exports in export_tasks.image.items() %}
+  Path: {{ path }}
+  {%- for exp in exports %}
+    |- {{ exp.name }}: {{ exp.state }}
+    {%- if exp.error %}
+      | Error: {{exp.error}}
+    {% endif %}
+  {%- endfor %}
+{% endfor -%}
+{% else %}
+  No images exported.
+{% endif -%}
+----------------------------------------------------------------------------
+Tables Exported:
+{%- if export_tasks.table %}
+{%- for path, exports in export_tasks.table.items() %}
+  Path: {{ path }}
+  {%- for exp in exports %}
+    |- {{ exp.name }}: {{ exp.state }}
+    {%- if exp.error %}
+      | Error: {{exp.error}}
+    {% endif %}
+  {%- endfor %}
+{% endfor -%}
+{% else %}
+  No tables exported.
+{% endif -%}
+----------------------------------------------------------------------------
+Terra Status:
+{%- if modis.terra -%}
+  {% set terra = modis.terra %}
+  Collection: {{ terra.collection }}
+  Total images: {{ terra.images }}
+  Last image: {{ terra.last_image }}
+  {# Last complete month: {{ terra.last_complete_month }} #}
+{% else %}
+  Collection Information not available or couldn't be saved.
+{% endif -%}
+----------------------------------------------------------------------------
+Aqua Status:
+{%- if modis.aqua -%}
+  {% set aqua = modis.aqua %}
+  Collection: {{ aqua.collection }}
+  Total images: {{ aqua.images }}
+  Last image: {{ aqua.last_image }}
+  {# Last complete month: {{ aqua.last_complete_month }} #}
+{% else %}
+  Collection Information not available or couldn't be saved.
+{% endif -%}
+----------------------------------------------------------------------------
+
+This message was automatically generated, replies to this message might not be monitored.
+
+Thanks. 
+The IPA Team

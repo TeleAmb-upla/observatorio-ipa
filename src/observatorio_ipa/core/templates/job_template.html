@@ -1,0 +1,146 @@
+
+{% extends "base_job_template.html" %}
+{% block content %}
+<div id="results-box" class ="section-box">
+    <div id="results-title" style="background-color: #333333;">
+        <h3 style="color: #FFFFFF;">Results</h3>
+    </div>
+    <!--
+    <div id="summary-content" class='section-content'>
+        <table id="summary-tbl">
+            {% for s in export_summary %}
+            <tr>
+                <td class="tbl-cell summary-tbl-label">{{ s.status }}</td>
+                <td class="tbl-cell summary-tbl-data">{{ s.count }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    -->
+</div>
+<div id="images-box" class="section-box">
+    <div id="images-title" class="section-title">
+        <h3>Images Exported</h3>
+    </div>
+    <div id="images-content" class="export-results section-content">
+        {%- if export_tasks.image %}
+            {%- for path, exports in export_tasks.image.items() %}
+                <p>Path: {{ path }}</p>
+                <ul>
+                {%- for exp in exports %}
+                    <li>
+                        <div> 
+                            {{ exp.name }}: {{ exp.state }}
+                            {%- if exp.error %}
+                            <br>
+                             |- Error: {{exp.error}}
+                            {% endif %}
+                        </div>
+                    </li>
+                    
+                {%- endfor %}
+                </ul>
+            {% endfor -%}
+        {% else %}
+            <p>No images exported.</p>
+        {% endif -%}
+    </div>
+</div>
+<div id="stats-box", class="section-box">
+    <div id="stats-title" class="section-title">
+        <h3>Table Exported</h3>
+    </div>
+    <div id="stats-content" class="export-results section-content">
+        {%- if export_tasks.table %}
+        {%- for path, exports in export_tasks.table.items() %}
+        <p>Path: {{ path }}</p>
+        <ul>
+            {%- for exp in exports %}
+            <li>
+                <div>
+                    {{ exp.name }}: {{ exp.state }}
+                    {%- if exp.error %}
+                    <br>
+                    |- Error: {{exp.error}}
+                    {% endif %}
+                </div>
+            </li>
+    
+            {%- endfor %}
+        </ul>
+        {% endfor -%}
+        {% else %}
+        <p>No tables exported.</p>
+        {% endif -%}
+    </div>
+</div>
+<div id="modis-box" class="section-box">
+    <div id="modis-title" style="background-color: #333333;">
+        <h3 style="color: #FFFFFF;">MODIS STATUS</h3>
+    </div>
+</div>
+<div id="terra-box" class="section-box">
+    <div id="terra-title" class="section-title">
+        <h3>Terra</h3>
+    </div>
+    <div id="terra-content" class="section-content">
+        {%- if modis.terra -%}
+        {% set terra = modis.terra %}
+        <table>
+            <tr>
+                <td class="tbl-cell modis-tbl-label">Collection:</td>
+                <td class="tbl-cell modis-tbl-data">{{ terra.collection }}</td>
+            </tr>
+            <tr>
+                <td class="tbl-cell modis-tbl-label">Total images:</td>
+                <td class="tbl-cell modis-tbl-data">{{ terra.images }}</td>
+            </tr>
+            <tr>
+                <td class="tbl-cell modis-tbl-label">Last image:</td>
+                <td class="tbl-cell modis-tbl-data">{{ terra.last_image }}</td>
+            </tr>
+            <!--
+            <tr>
+                <td class="tbl-cell modis-tbl-label">Last complete month:</td>
+                <td class="tbl-cell modis-tbl-data">{{ terra.last_complete_month }}</td>
+            </tr>
+            -->
+        </table>
+        {% else %}
+        <p>Collection Information not available or couldn't be saved.</p>
+        {% endif -%}
+    </div>
+</div>
+<div id="aqua-box" class="section-box">
+    <div id="aqua-title" class="section-title">
+        <h3>Aqua</h3>
+    </div>
+    <div id="aqua-content" class="section-content">
+        {%- if modis.aqua -%}
+        {% set aqua = modis.aqua %}
+        <table>
+            <tr>
+                <td class="tbl-cell modis-tbl-label">Collection:</td>
+                <td class="tbl-cell modis-tbl-data">{{ aqua.collection }}</td>
+            </tr>
+            <tr>
+                <td class="tbl-cell modis-tbl-label">Total images:</td>
+                <td class="tbl-cell modis-tbl-data">{{ aqua.images }}</td>
+            </tr>
+            <tr>
+                <td class="tbl-cell modis-tbl-label">Last image:</td>
+                <td class="tbl-cell modis-tbl-data">{{ aqua.last_image }}</td>
+            </tr>
+            <!--
+            <tr>
+                <td class="tbl-cell modis-tbl-label">Last complete month:</td>
+                <td class="tbl-cell modis-tbl-data">{{ aqua.last_complete_month }}</td>
+            </tr>
+            -->
+        </table>
+        {% else %}
+        <p>Collection Information not available or couldn't be saved.</p>
+        {% endif -%}
+    </div>
+</div>
+{% endblock %}
