@@ -5,6 +5,7 @@ import ee
 from gee_toolbox.gee import assets
 from google.cloud import storage
 from observatorio_ipa.services.gee.exports import ExportTaskList
+from observatorio_ipa.core.config import LOGGER_NAME
 from observatorio_ipa.core.workflows.images.monthly_export import _fix_name_prefix
 from observatorio_ipa.services.gee.processes.stats.basins import (
     month,
@@ -13,7 +14,7 @@ from observatorio_ipa.services.gee.processes.stats.basins import (
     elevation,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(LOGGER_NAME)
 
 
 def _get_imgs_in_monthly_ic(
@@ -445,7 +446,7 @@ def _ee_masked_dem(ee_image):
 
 
 # TODO Move fix Name Prefix to somewhere else
-# TODO: See if google credentials and project can be provided in settings
+# TODO Include rollback of stats file move
 def monthly_tbl_export_proc(
     settings: dict,
     storage_conn,
@@ -458,7 +459,7 @@ def monthly_tbl_export_proc(
     if not skip_manifest:
         if not force_overwrite and not compare_manifest_to_collection(
             manifest_src=settings["manifest_source"],
-            manifest_path=settings["monthly_manifest_path"],
+            manifest_path=settings["manifest_path"],
             manifest_name="monthly_manifest.json",
             collection_path=settings["monthly_collection_path"],
             image_prefix=settings["monthly_image_prefix"],
@@ -508,7 +509,7 @@ def monthly_tbl_export_proc(
 
     # DEM image with remapped values to the nearest 100 meters
     ee_dem_img = _ee_masked_dem(
-        ee.image.Image(Path(settings["stats_dem_asset_path"]).as_posix())
+        ee.image.Image(Path(settings["dem_asset_path"]).as_posix())
         .divide(100)
         .floor()
         .multiply(100)
@@ -525,27 +526,27 @@ def monthly_tbl_export_proc(
         common_tbl_prefix = _fix_name_prefix(common_tbl_prefix)
         tbl_names = {k: f"{common_tbl_prefix}{v}" for k, v in tbl_names.items()}
 
-    print("Table Names Prefix:")
-    for tbl_name in tbl_names.values():
-        print(f" - {tbl_name}")
+    # print("Table Names Prefix:")
+    # for tbl_name in tbl_names.values():
+    #     print(f" - {tbl_name}")
 
-        # ee_icollection: ee.imagecollection.ImageCollection,
-        # ee_basins_fc: ee.featurecollection.FeatureCollection,
-        # basins_cd_property: str,
-        # ee_dem_img: ee.image.Image,
-        # export_target: str,
-        # export_path: str,  # "elev_ee"
-        # table_prefix: str,  # "MCD_SCA_elev_BNA_" + cuenca
-        # basin_codes: list[str] | None = None,
-        # exclude_basin_codes: list[str] | None = None,
-        # max_exports: int | None = None,
+    # ee_icollection: ee.imagecollection.ImageCollection,
+    # ee_basins_fc: ee.featurecollection.FeatureCollection,
+    # basins_cd_property: str,
+    # ee_dem_img: ee.image.Image,
+    # export_target: str,
+    # export_path: str,  # "elev_ee"
+    # table_prefix: str,  # "MCD_SCA_elev_BNA_" + cuenca
+    # basin_codes: list[str] | None = None,
+    # exclude_basin_codes: list[str] | None = None,
+    # max_exports: int | None = None,
 
     monthly_common_args = {
         "ee_icollection": ee_monthly_ic,
         "ee_basins_fc": ee_basins_fc,
         "basins_cd_property": settings["basins_cd_property"],
         "ee_dem_img": ee_dem_img,
-        "export_target": settings["stats_export_target"],
+        "export_target": settings["export_target"],
         "storage_bucket": storage_bucket,
         "basin_codes": settings.get("basin_codes", None),
         "exclude_basin_codes": settings.get("exclude_basin_codes", None),
@@ -555,34 +556,39 @@ def monthly_tbl_export_proc(
     joined_export_tasks = ExportTaskList()
     # ---------- ELEVATION STATISTICS -----------
     full_elev_export_path = Path(
-        settings["stats_base_export_path"], settings["elevation_tbl_export_path"]
+        settings["base_export_path"], settings["elevation_tbl_export_path"]
     )
     archive_elev_export_path = Path(
-        settings["stats_base_export_path"],
+        settings["base_export_path"],
         "archive",
         settings["elevation_tbl_export_path"],
     )
     print(f"Elevation Export Path: {full_elev_export_path}")
     print(f"Elevation Archive Path: {archive_elev_export_path}")
+
     elev_export_tasks = ExportTaskList()
     elevation_common_args = {
         **monthly_common_args,
         "export_path": full_elev_export_path.as_posix(),
     }
+    if settings.get("elevation_stats", True):
+        # print("Creating Elevation Statistics Exports...")
+        # Not needed on a Monthly Basis
+        # elev_bna = elevation.Elev_BNA(
+        #     **elevation_common_args,
+        #     table_prefix=settings["elev_basin_tbl_prefix"],
+        # )
+        # elev_vna.calc_stats()
+        # elev_export_tasks.extend(elev_vna.make_exports())
 
-    # Not needed on a Monthly Basis
-    # elev_bna = elevation.Elev_BNA(
-    #     **elevation_common_args,
-    #     table_prefix=settings["elev_tbl_prefix"],
-    # )
+        sca_elev_bna = elevation.SCA_Elev_BNA(
+            **elevation_common_args,
+            table_prefix=tbl_names["sca_elev_basin_tbl_prefix"],
+        )
+        sca_elev_bna.calc_stats()
+        elev_export_tasks.extend(sca_elev_bna.make_exports())
 
-    sca_elev_bna = elevation.SCA_Elev_BNA(
-        **elevation_common_args,
-        table_prefix=tbl_names["sca_elev_basin_tbl_prefix"],
-    )
-    sca_elev_bna.calc_stats()
-    elev_export_tasks.extend(sca_elev_bna.make_exports())
-
+    # print("Move and Rename")
     elev_export_tasks = _task_move_and_rename(
         task_list=elev_export_tasks,
         src_path=full_elev_export_path,
@@ -595,10 +601,10 @@ def monthly_tbl_export_proc(
 
     # ---------- MONTH STATISTICS -----------
     full_month_export_path = Path(
-        settings["stats_base_export_path"], settings["month_tbl_export_path"]
+        settings["base_export_path"], settings["month_tbl_export_path"]
     )
     archive_month_export_path = Path(
-        settings["stats_base_export_path"],
+        settings["base_export_path"],
         "archive",
         settings["month_tbl_export_path"],
     )
@@ -606,32 +612,32 @@ def monthly_tbl_export_proc(
     print(f"Month Archive Path: {archive_month_export_path}")
 
     month_export_tasks = ExportTaskList()
-
     month_common_args = {
         **monthly_common_args,
         "export_path": full_month_export_path.as_posix(),
     }
 
-    sca_m_bna = month.SCA_M_BNA(
-        **month_common_args,
-        table_prefix=tbl_names["sca_m_basin_tbl_prefix"],
-    )
-    sca_m_bna.calc_stats()
-    month_export_tasks.extend(sca_m_bna.make_exports())
+    if settings.get("month_stats", True):
+        sca_m_bna = month.SCA_M_BNA(
+            **month_common_args,
+            table_prefix=tbl_names["sca_m_basin_tbl_prefix"],
+        )
+        sca_m_bna.calc_stats()
+        month_export_tasks.extend(sca_m_bna.make_exports())
 
-    sca_m_elev_bna = month.SCA_M_Elev_BNA(
-        **month_common_args,
-        table_prefix=tbl_names["sca_m_elev_basin_tbl_prefix"],
-    )
-    sca_m_elev_bna.calc_stats()
-    month_export_tasks.extend(sca_m_elev_bna.make_exports())
+        sca_m_elev_bna = month.SCA_M_Elev_BNA(
+            **month_common_args,
+            table_prefix=tbl_names["sca_m_elev_basin_tbl_prefix"],
+        )
+        sca_m_elev_bna.calc_stats()
+        month_export_tasks.extend(sca_m_elev_bna.make_exports())
 
-    sca_m_trend_bna = month.SCA_M_Trend_BNA(
-        **month_common_args,
-        table_prefix=tbl_names["sca_m_trend_basin_tbl_prefix"],
-    )
-    sca_m_trend_bna.calc_stats()
-    month_export_tasks.extend(sca_m_trend_bna.make_exports())
+        sca_m_trend_bna = month.SCA_M_Trend_BNA(
+            **month_common_args,
+            table_prefix=tbl_names["sca_m_trend_basin_tbl_prefix"],
+        )
+        sca_m_trend_bna.calc_stats()
+        month_export_tasks.extend(sca_m_trend_bna.make_exports())
 
     month_export_tasks = _task_move_and_rename(
         task_list=month_export_tasks,
@@ -645,10 +651,10 @@ def monthly_tbl_export_proc(
 
     # ---------- MONTHLY STATISTICS -----------
     full_monthly_export_path = Path(
-        settings["stats_base_export_path"], settings["year_month_tbl_export_path"]
+        settings["base_export_path"], settings["year_month_tbl_export_path"]
     )
     archive_monthly_export_path = Path(
-        settings["stats_base_export_path"],
+        settings["base_export_path"],
         "archive",
         settings["year_month_tbl_export_path"],
     )
@@ -656,39 +662,39 @@ def monthly_tbl_export_proc(
     print(f"Monthly Archive Path: {archive_monthly_export_path}")
 
     monthly_export_tasks = ExportTaskList()
-
     year_month_common_args = {
         **monthly_common_args,
         "export_path": full_monthly_export_path.as_posix(),
     }
 
-    sca_y_m_bna = year_month.SCA_Y_M_BNA(
-        **year_month_common_args,
-        table_prefix=tbl_names["sca_y_m_basin_tbl_prefix"],
-    )
-    sca_y_m_bna.calc_stats()
-    month_export_tasks.extend(sca_y_m_bna.make_exports())
+    if settings.get("monthly_stats", True):
+        sca_y_m_bna = year_month.SCA_Y_M_BNA(
+            **year_month_common_args,
+            table_prefix=tbl_names["sca_y_m_basin_tbl_prefix"],
+        )
+        sca_y_m_bna.calc_stats()
+        month_export_tasks.extend(sca_y_m_bna.make_exports())
 
-    sca_ym_bna = year_month.SCA_YM_BNA(
-        **year_month_common_args,
-        table_prefix=tbl_names["sca_ym_basin_tbl_prefix"],
-    )
-    sca_ym_bna.calc_stats()
-    monthly_export_tasks.extend(sca_ym_bna.make_exports())
+        sca_ym_bna = year_month.SCA_YM_BNA(
+            **year_month_common_args,
+            table_prefix=tbl_names["sca_ym_basin_tbl_prefix"],
+        )
+        sca_ym_bna.calc_stats()
+        monthly_export_tasks.extend(sca_ym_bna.make_exports())
 
-    sca_ym_elev_bna = year_month.SCA_YM_Elev_BNA(
-        **year_month_common_args,
-        table_prefix=tbl_names["sca_ym_elev_basin_tbl_prefix"],
-    )
-    sca_ym_elev_bna.calc_stats()
-    monthly_export_tasks.extend(sca_ym_elev_bna.make_exports())
+        sca_ym_elev_bna = year_month.SCA_YM_Elev_BNA(
+            **year_month_common_args,
+            table_prefix=tbl_names["sca_ym_elev_basin_tbl_prefix"],
+        )
+        sca_ym_elev_bna.calc_stats()
+        monthly_export_tasks.extend(sca_ym_elev_bna.make_exports())
 
-    snowline_ym_bna = year_month.Snowline_YM_BNA(
-        **year_month_common_args,
-        table_prefix=tbl_names["snowline_ym_basin_tbl_prefix"],
-    )
-    snowline_ym_bna.calc_stats()
-    monthly_export_tasks.extend(snowline_ym_bna.make_exports())
+        snowline_ym_bna = year_month.Snowline_YM_BNA(
+            **year_month_common_args,
+            table_prefix=tbl_names["snowline_ym_basin_tbl_prefix"],
+        )
+        snowline_ym_bna.calc_stats()
+        monthly_export_tasks.extend(snowline_ym_bna.make_exports())
 
     monthly_export_tasks = _task_move_and_rename(
         task_list=monthly_export_tasks,
@@ -702,32 +708,29 @@ def monthly_tbl_export_proc(
 
     # ---------- YEAR STATISTICS -----------
     full_year_export_path = Path(
-        settings["stats_base_export_path"], settings["year_tbl_export_path"]
+        settings["base_export_path"], settings["year_tbl_export_path"]
     )
     archive_year_export_path = Path(
-        settings["stats_base_export_path"],
+        settings["base_export_path"],
         "archive",
         settings["year_tbl_export_path"],
     )
     print(f"Year Export Path: {full_year_export_path}")
     print(f"Year Archive Path: {archive_year_export_path}")
-    year_export_tasks = ExportTaskList()
 
+    year_export_tasks = ExportTaskList()
     year_common_args = {
         **monthly_common_args,
         "export_path": full_year_export_path.as_posix(),
     }
 
-    snowline_y_bna = year.Snowline_Y_BNA(
-        **year_common_args,
-        table_prefix=tbl_names["snowline_y_basin_tbl_prefix"],
-    )
-    snowline_y_bna.calc_stats()
-    year_export_tasks.extend(snowline_y_bna.make_exports())
-
-    ####################################
-    # MOVE AND RENAME EXISTING STATS
-    ####################################
+    if settings.get("year_stats", True):
+        snowline_y_bna = year.Snowline_Y_BNA(
+            **year_common_args,
+            table_prefix=tbl_names["snowline_y_basin_tbl_prefix"],
+        )
+        snowline_y_bna.calc_stats()
+        year_export_tasks.extend(snowline_y_bna.make_exports())
 
     year_export_tasks = _task_move_and_rename(
         task_list=year_export_tasks,
@@ -756,13 +759,13 @@ def monthly_tbl_export_proc(
 
     manifest = get_manifest(
         source=settings["manifest_source"],
-        manifest_path=settings["monthly_manifest_path"],
+        manifest_path=settings["manifest_path"],
         manifest_name="monthly_manifest.json",
         conn=storage_conn,
         storage_bucket=storage_bucket,
     )
 
-    previous_exports = stats_exports = manifest.get("meta", {}).get("stats_exports", [])
+    previous_exports = manifest.get("meta", {}).get("stats_exports", [])
     # -- Remove new exports from old manifest
     meta_stats_exports = [
         item for item in previous_exports if item["name"] not in names_tasks_started
@@ -787,14 +790,14 @@ def monthly_tbl_export_proc(
         ),
         collection_path=settings["monthly_collection_path"],
         meta={
-            "target_system": settings["stats_export_target"],
+            "target_system": settings["export_target"],
             "stats_exports": meta_stats_exports,
         },
     )
 
     save_manifest(
         target=settings["manifest_source"],
-        manifest_path=settings["monthly_manifest_path"],
+        manifest_path=settings["manifest_path"],
         manifest_name="monthly_manifest.json",
         manifest_json=manifest_json,
         storage_conn=storage_conn,

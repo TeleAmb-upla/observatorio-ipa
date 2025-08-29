@@ -4,7 +4,7 @@ from email_validator import validate_email, EmailNotValidError
 from datetime import datetime
 from .config import Settings, LOGGER_NAME
 
-from ..utils.messaging import EmailSender, parse_emails, get_template
+from ..utils.messaging import EmailSender, parse_emails
 from ..utils import dates
 from ..utils import lists
 from ..services.gee import assets as gee_assets
@@ -242,55 +242,55 @@ def read_file_to_var(file_path: str) -> str:
 #     return pprint.pformat(masked_data)
 
 
-def terminate_error(
-    err_message: str,
-    script_start_time: str | None = None,
-    exception: Exception | None = None,
-    email_service: EmailSender | None = None,
-) -> None:
-    """
-    Terminate the script execution due to an error and writes to log file.
+# def terminate_error(
+#     err_message: str,
+#     script_start_time: str | None = None,
+#     exception: Exception | None = None,
+#     email_service: EmailSender | None = None,
+# ) -> None:
+#     """
+#     Terminate the script execution due to an error and writes to log file.
 
-    If an EmailSender object is provided, an email with the error details will be sent to
-    the emails provided to the object.
+#     If an EmailSender object is provided, an email with the error details will be sent to
+#     the emails provided to the object.
 
-    Args:
-        err_message (str): The error message describing the cause of the termination.
-        script_start_time (str): The start time of the script execution.
-        exception_traceback (Exception | None): An optional Exception object containing the traceback of the error. Defaults to None.,
-        email_service (EmailSender | None): An optional EmailSender object for sending error emails. Defaults to None.
+#     Args:
+#         err_message (str): The error message describing the cause of the termination.
+#         script_start_time (str): The start time of the script execution.
+#         exception_traceback (Exception | None): An optional Exception object containing the traceback of the error. Defaults to None.,
+#         email_service (EmailSender | None): An optional EmailSender object for sending error emails. Defaults to None.
 
-    Returns:
-        None
+#     Returns:
+#         None
 
-    Raises:
-        SystemExit: This function terminates the script execution using sys.exit().
+#     Raises:
+#         SystemExit: This function terminates the script execution using sys.exit().
 
-    """
-    if not script_start_time:
-        script_start_time = "Not logged"
-    script_end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#     """
+#     if not script_start_time:
+#         script_start_time = "Not logged"
+#     script_end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Email
-    if email_service is not None:
+#     # Email
+#     if email_service is not None:
 
-        # get and Update template
-        default_template = "Error Message: [error_message]"
-        message = get_template(ERROR_EMAIL_TEMPLATE, default_template)
-        message = message.replace("[error_message]", err_message)
-        message = message.replace("[start_time]", script_start_time)
-        message = message.replace("[end_time]", script_end_time)
+#         # get and Update template
+#         default_template = "Error Message: [error_message]"
+#         message = get_template(ERROR_EMAIL_TEMPLATE, default_template)
+#         message = message.replace("[error_message]", err_message)
+#         message = message.replace("[start_time]", script_start_time)
+#         message = message.replace("[end_time]", script_end_time)
 
-        subject = "OSN Image Processing Automation"
-        email_service.send_email(subject=subject, body=message)
+#         subject = "OSN Image Processing Automation"
+#         email_service.send_email(subject=subject, body=message)
 
-    # Logging
-    if exception:
-        logger.error(str(exception))
-        print(str(exception))
+#     # Logging
+#     if exception:
+#         logger.error(str(exception))
+#         print(str(exception))
 
-    logger.error(err_message)
-    print(err_message)
+#     logger.error(err_message)
+#     print(err_message)
 
-    logger.info("------ EXITING SCRIPT ------")
-    return
+#     logger.info("------ EXITING SCRIPT ------")
+#     return

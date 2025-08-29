@@ -302,7 +302,7 @@ def monthly_img_export_proc(
         dict: Results of the monthly export process.
     """
 
-    logger.info("Starting Monthly Export Process")
+    logger.debug("Starting Monthly Image Export Process")
 
     # Fix name prefix
     name_prefix = _fix_name_prefix(name_prefix)

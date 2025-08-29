@@ -1,14 +1,20 @@
-import sqlite3, logging, random, datetime
+import sqlite3, logging, random, datetime, time
 from google.oauth2 import service_account
 import ee.batch
 from observatorio_ipa.utils import db
+from observatorio_ipa.core.config import Settings, LOGGER_NAME
 from observatorio_ipa.core.workflows.images import monthly_export
 from observatorio_ipa.core.workflows.tables import monthly_exports as tbl_monthly_export
 from observatorio_ipa.services.gee.exports import ExportTaskList, ExportTask
+from observatorio_ipa.services.gee import dates as gee_dates
 from observatorio_ipa.services import connections
-from observatorio_ipa.core.workflows import wflows_connections
+from observatorio_ipa.services.messaging import email
+from observatorio_ipa.core.defaults import (
+    DEFAULT_TERRA_COLLECTION,
+    DEFAULT_AQUA_COLLECTION,
+)
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(LOGGER_NAME)
 
 
 DEFAULT_POLLING_INTERVAL_SEC = 15
@@ -110,9 +116,9 @@ def add_exportTask_to_db(
     conn.execute(
         """INSERT INTO exports (
             id, job_id, state, type, name, target, path, task_id, 
-            task_status, next_check_at, poll_interval_sec, 
+            task_status, error, next_check_at, poll_interval_sec, 
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             export_task.id,
             job_id,
@@ -123,6 +129,7 @@ def add_exportTask_to_db(
             export_task.path.as_posix(),
             getattr(export_task.task, "id", None),
             export_task.task_status,
+            export_task.error,
             now_iso,
             DEFAULT_POLLING_INTERVAL_SEC,
             now_iso,
@@ -174,37 +181,78 @@ def _get_state_of_tasks(conn, job_id, type) -> list[str]:
     return [r["state"] for r in rows]
 
 
+def _save_modis_status(conn, job_id):
+    now_iso = db.datetime_to_iso(db.utc_now())
+    ee_terra_ic = ee.imagecollection.ImageCollection(DEFAULT_TERRA_COLLECTION)
+    ee_aqua_ic = ee.imagecollection.ImageCollection(DEFAULT_AQUA_COLLECTION)
+    terra_image_dates = gee_dates.get_collection_dates(ee_terra_ic)
+    aqua_image_dates = gee_dates.get_collection_dates(ee_aqua_ic)
+    terra_image_dates.sort()
+    aqua_image_dates.sort()
+    if terra_image_dates:
+        conn.execute(
+            """INSERT INTO modis 
+                    (job_id, name, collection, images, last_image, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                job_id,
+                "terra",
+                DEFAULT_TERRA_COLLECTION,
+                len(terra_image_dates),
+                terra_image_dates[-1] if terra_image_dates else None,
+                now_iso,
+                now_iso,
+            ),
+        )
+    if aqua_image_dates:
+        conn.execute(
+            """INSERT INTO modis 
+                     (job_id, name, collection, images, last_image, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                job_id,
+                "aqua",
+                DEFAULT_AQUA_COLLECTION,
+                len(aqua_image_dates),
+                aqua_image_dates[-1] if aqua_image_dates else None,
+                now_iso,
+                now_iso,
+            ),
+        )
+
+
+# TODO: Review Job Status logic
 def update_job(conn, job_id) -> None:
     """Updates the job based on the status of image and stat exports"""
+
+    # print(f"Updating status for job {job_id}")
 
     now_iso = db.datetime_to_iso(db.utc_now())
     # Exit if job is not RUNNING - Assumes Nothing Needs Update
     job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not job:
+        raise ValueError(f"Job with id {job_id} not found")
+
     if job["job_status"] != "RUNNING":
         return
 
+    # print("Checking Image status")
     # ---------- IMAGE_EXPORT_STATUS ----------
     image_states = _get_state_of_tasks(conn, job_id, "image")
     match job["image_export_status"]:
         case "NOT_REQUIRED":
-            if not image_states:
-                # Normal: No image export required/Expected - Move on to stats assessment
-                pass
-            elif all(s != "RUNNING" for s in image_states):
-                # Not Normal - Export tasks might have been created but failed to update Job Status
-                error_message = _join_error_msgs(
-                    job["error"],
-                    "No image exports were expected but export tasks were created.",
-                )
-                conn.execute(
-                    """UPDATE jobs SET job_status='FAILED', image_export_status='FAILED',
-                    error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
-                )
-                return
-            else:
-                # Not Normal: Same as above but giving time to complete exports before reporting
-                return
+            # Not Normal - state shouldn't exist
+            error_message = _join_error_msgs(
+                job["error"],
+                "Program produced an abnormal state while running Image export procedure.",
+            )
+            conn.execute(
+                """UPDATE jobs SET 
+                image_export_status='FAILED',
+                error=?, updated_at=? WHERE id=?""",
+                (error_message, now_iso, job_id),
+            )
+            return
 
         case "PENDING":
             if not image_states:
@@ -212,20 +260,18 @@ def update_job(conn, job_id) -> None:
                 # ! Add logic for deadline (Pending over x days)
                 return
 
-            elif all(s != "RUNNING" for s in image_states):
+            else:
                 # Not Normal - Export tasks might have been created but failed to update Job Status and never changed to "RUNNING"
                 error_message = _join_error_msgs(
                     job["error"],
-                    "Cannot verify all exports were created/completed successfully",
+                    "One or more Image tasks might have failed to create or could not be saved to DB. Check logs and GEE tasks for details.",
                 )
                 conn.execute(
-                    """UPDATE jobs SET job_status='FAILED', image_export_status='FAILED',
-                    error=?, updated_at=? WHERE id=?""",
+                    """UPDATE jobs SET 
+                        image_export_status='FAILED',
+                        error=?, updated_at=? WHERE id=?""",
                     (error_message, now_iso, job_id),
                 )
-                return
-            else:
-                # Not Normal: Same as above but giving time to complete exports before reporting
                 return
 
         case "RUNNING":
@@ -233,45 +279,57 @@ def update_job(conn, job_id) -> None:
                 # Not Normal: If image_export_status = RUNNING, at least 1 image export should be present
                 error_message = _join_error_msgs(
                     job["error"],
-                    "Image tasks failed to create or could not be saved to DB. Check logs for details.",
+                    "One or more Image tasks might have failed to create or could not be saved to DB. Check logs and GEE tasks for details.",
                 )
                 conn.execute(
-                    """UPDATE jobs SET job_status='FAILED', image_export_status='FAILED', 
-                   error=?, updated_at=? WHERE id=?""",
+                    """UPDATE jobs SET 
+                        image_export_status='FAILED', 
+                        error=?, updated_at=? WHERE id=?""",
                     (error_message, now_iso, job_id),
                 )
                 return
 
             elif all(s != "RUNNING" for s in image_states):
                 # Normal: All image export tasks have now completed
-                conn.execute(
-                    """UPDATE jobs SET image_export_status='COMPLETED', 
-                    updated_at=? WHERE id=?""",
-                    (now_iso, job_id),
-                )
+                if any(s == "FAILED" for s in image_states):
+                    error_message = _join_error_msgs(
+                        job["error"],
+                        "One or more image exports failed",
+                    )
+                    conn.execute(
+                        """UPDATE jobs SET 
+                            image_export_status='FAILED', 
+                            error=?, updated_at=? WHERE id=?""",
+                        (error_message, now_iso, job_id),
+                    )
+                    return
+                else:
+                    conn.execute(
+                        """UPDATE jobs SET 
+                            image_export_status='COMPLETED', 
+                            updated_at=? WHERE id=?""",
+                        (now_iso, job_id),
+                    )
             else:
                 # Normal: 1+ exports are still running - No change - keep "RUNNING" state
                 return
 
         case "FAILED":
-            if not image_states or all(s != "RUNNING" for s in image_states):
-                # Not Normal: Something went wrong somewhere - Unknown error
-                error_message = _join_error_msgs(
-                    job["error"],
-                    "Unknown error - Something went wrong somewhere - check the logs.",
-                )
-                conn.execute(
-                    """UPDATE jobs SET job_status='FAILED',
-                    error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
-                )
-                return
-            else:
-                # Not Normal: Something went wrong somewhere - but keep "RUNNING" state until tasks complete
-                return
+            # Do Nothing - Something set the Failed state - leave as is
+            return
 
         case "COMPLETED":
-            if not image_states or all(s == "RUNNING" for s in image_states):
+            if not image_states:
+                # Normal. No Images required exporting. Set to Skip Stats Export
+                if job["stats_export_status"] in (None, "PENDING"):
+                    conn.execute(
+                        """UPDATE jobs SET 
+                            stats_export_status='NOT_REQUIRED', 
+                            updated_at=? WHERE id=?""",
+                        (now_iso, job_id),
+                    )
+                    return
+            elif any(s == "RUNNING" for s in image_states):
                 # Not Normal: Not expecting to still be 'RUNNING' exports if image_export_status is COMPLETED
                 # revert to "RUNNING" stats has not Ran
                 if job["stats_export_status"] in (
@@ -279,43 +337,78 @@ def update_job(conn, job_id) -> None:
                     "PENDING",
                 ):
                     conn.execute(
-                        """UPDATE jobs SET image_export_status='RUNNING', updated_at=? WHERE id=?""",
+                        """UPDATE jobs SET 
+                        image_export_status='RUNNING', 
+                        updated_at=? WHERE id=?""",
                         (now_iso, job_id),
                     )
+                return
+            elif any(s == "FAILED" for s in image_states):
+                # Not Normal: If image_export_status = COMPLETED, No images should have failed
+                error_message = _join_error_msgs(
+                    job["error"],
+                    "One or more image exports failed",
+                )
+                conn.execute(
+                    """UPDATE jobs SET 
+                        image_export_status='FAILED', 
+                        error=?, updated_at=? WHERE id=?""",
+                    (error_message, now_iso, job_id),
+                )
                 return
             else:
                 # Normal: Continue to stats status assessment
                 pass
 
+        case _:
+            # Not Normal: Unknown state: Set as failed
+            error_message = _join_error_msgs(
+                job["error"],
+                "Image export procedure entered an unknown state",
+            )
+            conn.execute(
+                """UPDATE jobs SET 
+                    image_export_status='FAILED', 
+                    error=?, updated_at=? WHERE id=?""",
+                (error_message, now_iso, job_id),
+            )
+            return
+
     # ---------- STATS_EXPORT_STATUS ----------
     # Sanity check in case I missed something above
-    if job["image_export_status"] not in ("NOT_REQUIRED", "COMPLETED"):
+
+    if job["image_export_status"] in ["NOT_REQUIRED", "PENDING", "RUNNING"] or any(
+        s == "RUNNING" for s in image_states
+    ):
         return
 
+    # print("Checking Stats status")
     table_states = _get_state_of_tasks(conn, job_id, "table")
     match job["stats_export_status"]:
         case "NOT_REQUIRED":
+            # print("Successfully entered NOT_REQUIRED")
             if not table_states:
-                # Normal: No table export required/Expected - Shouldn't have come this far though
+                # print("Successfully entered no stat tasks")
+                # Normal: No table export required/Expected
                 conn.execute(
-                    """UPDATE jobs SET job_status='COMPLETED', updated_at=? WHERE id=?""",
+                    """UPDATE jobs SET 
+                        stats_export_status='COMPLETED', 
+                        updated_at=? WHERE id=?""",
                     (now_iso, job_id),
                 )
                 return
-            elif all(s != "RUNNING" for s in table_states):
+            else:
                 # Not Normal - Export tasks might have been created but failed to update Job Status
                 error_message = _join_error_msgs(
                     job["error"],
-                    "No Stats exports were expected but export tasks were created.",
+                    "Program produced an abnormal state while running Stats export procedure.",
                 )
                 conn.execute(
-                    """UPDATE jobs SET job_status='FAILED', stats_export_status='FAILED',
-                    error=?, updated_at=? WHERE id=?""",
+                    """UPDATE jobs SET 
+                        stats_export_status='FAILED',
+                        error=?, updated_at=? WHERE id=?""",
                     (error_message, now_iso, job_id),
                 )
-                return
-            else:
-                # Not Normal: Same as above but giving time to complete exports before reporting
                 return
 
         case "PENDING":
@@ -324,20 +417,18 @@ def update_job(conn, job_id) -> None:
                 # ! Add logic for deadline (Pending over x days)
                 return
 
-            elif all(s != "RUNNING" for s in table_states):
-                # Not Normal - Export tasks might have been created but failed to update Job Status and never changed to "RUNNING"
+            else:
+                # Not Normal: Export tasks might have been created but failed to update Job Status
                 error_message = _join_error_msgs(
                     job["error"],
-                    "Cannot verify all exports were created/completed successfully",
+                    "One or more Stats tasks might have failed to create or save to DB. Check logs and GEE tasks for details.",
                 )
                 conn.execute(
-                    """UPDATE jobs SET job_status='FAILED', stats_export_status='FAILED',
-                    error=?, updated_at=? WHERE id=?""",
+                    """UPDATE jobs SET 
+                        stats_export_status='FAILED',
+                        error=?, updated_at=? WHERE id=?""",
                     (error_message, now_iso, job_id),
                 )
-                return
-            else:
-                # Not Normal: Same as above but giving time to complete exports before reporting
                 return
 
         case "RUNNING":
@@ -345,59 +436,136 @@ def update_job(conn, job_id) -> None:
                 # Not Normal: If stats_export_status = RUNNING, at least 1 stats export should be present
                 error_message = _join_error_msgs(
                     job["error"],
-                    "Stats tasks failed to create or could not be saved to DB. Check logs for details.",
+                    "One or more Stats tasks might have failed to create or save to DB. Check logs and GEE tasks for details.",
                 )
                 conn.execute(
-                    """UPDATE jobs SET job_status='FAILED', stats_export_status='FAILED', 
+                    """UPDATE jobs SET 
+                    stats_export_status='FAILED', 
                     error=?, updated_at=? WHERE id=?""",
                     (error_message, now_iso, job_id),
                 )
                 return
 
             elif all(s != "RUNNING" for s in table_states):
-                # Normal: All stats export tasks have now completed
-                conn.execute(
-                    """UPDATE jobs SET job_status='COMPLETED', stats_export_status='COMPLETED', 
-                    updated_at=? WHERE id=?""",
-                    (now_iso, job_id),
-                )
+                if any(s == "FAILED" for s in table_states):
+                    error_message = _join_error_msgs(
+                        job["error"],
+                        "One or more Stats exports failed",
+                    )
+                    conn.execute(
+                        """UPDATE jobs SET 
+                            stats_export_status='FAILED', 
+                            error=?, updated_at=? WHERE id=?""",
+                        (error_message, now_iso, job_id),
+                    )
+                    return
+                else:
+                    conn.execute(
+                        """UPDATE jobs SET 
+                            stats_export_status='COMPLETED', 
+                            updated_at=? WHERE id=?""",
+                        (now_iso, job_id),
+                    )
             else:
                 # Normal: 1+ exports are still running - No change - keep "RUNNING" state
                 return
 
         case "FAILED":
-            if not table_states or all(s != "RUNNING" for s in table_states):
-                # Not Normal: Something went wrong somewhere - Unknown error
-                error_message = _join_error_msgs(
-                    job["error"],
-                    "Unknown error - Something went wrong somewhere - check the logs.",
-                )
-                conn.execute(
-                    """UPDATE jobs SET job_status='FAILED',
-                    error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
-                )
-                return
-            else:
-                # Not Normal: Something went wrong somewhere - but keep "RUNNING" state until tasks complete
-                return
+            # Do Nothing - Something set the Failed state - leave as is
+            return
 
         case "COMPLETED":
-            if not table_states or all(s == "RUNNING" for s in table_states):
+            if not table_states:
+                # Normal: Finished without any exports. Continue to update Job Status
+                pass
+            if any(s == "RUNNING" for s in table_states):
                 # Not Normal: Not expecting to still be 'RUNNING' exports if stats_export_status is COMPLETED
                 # revert to "RUNNING" stats until all tasks complete if reporting has not gone out
-                if job["report_status"] in (
-                    "SKIP",
-                    "PENDING",
-                ):
-                    conn.execute(
-                        """UPDATE jobs SET stats_export_status='RUNNING', updated_at=? WHERE id=?""",
-                        (now_iso, job_id),
-                    )
+                conn.execute(
+                    """UPDATE jobs SET 
+                    stats_export_status='RUNNING', 
+                    updated_at=? WHERE id=?""",
+                    (now_iso, job_id),
+                )
                 return
             else:
-                # Normal: Continue to reporting status assessment
-                pass
+                if any(s == "FAILED" for s in table_states):
+                    # Not Normal: If any exports failed, set to "FAILED"
+                    conn.execute(
+                        """UPDATE jobs SET 
+                        stats_export_status='FAILED', 
+                        updated_at=? WHERE id=?""",
+                        (now_iso, job_id),
+                    )
+                else:
+                    # Normal: Continue to Job status assessment
+                    pass
+
+        case _:
+            # Not Normal: Unknown state: Set as failed
+            error_message = _join_error_msgs(
+                job["error"],
+                "Stats export procedure entered an unknown state",
+            )
+            conn.execute(
+                """UPDATE jobs SET 
+                    stats_export_status='FAILED', 
+                    error=?, updated_at=? WHERE id=?""",
+                (error_message, now_iso, job_id),
+            )
+            return
+
+    # -------------- JOB_STATUS --------------
+    # Sanity check in case I missed something above
+    # fmt: off
+    if (job["stats_export_status"] in ["NOT_REQUIRED", "PENDING", "RUNNING"] or 
+    any(s == "RUNNING" for s in image_states) or 
+    any(s == "RUNNING" for s in table_states)):
+        return
+    # fmt: on
+
+    match job["job_status"]:
+        case "RUNNING":
+            if (
+                job["image_export_status"] == "FAILED"
+                or job["stats_export_status"] == "FAILED"
+            ):
+                # Not Normal: If any exports failed, set to "FAILED"
+                # No error message required, should have been set in image or stats updates
+                conn.execute(
+                    """UPDATE jobs SET 
+                    job_status='FAILED',
+                    updated_at=? WHERE id=?""",
+                    (now_iso, job_id),
+                )
+            else:
+                # Normal: Finished Successfully
+                conn.execute(
+                    """UPDATE jobs SET 
+                    job_status='COMPLETED',
+                    updated_at=? WHERE id=?""",
+                    (now_iso, job_id),
+                )
+            return
+
+        case "FAILED" | "COMPLETED":
+            return
+
+        case _:
+            # Not Normal: Unknown state: Set as failed
+            error_message = _join_error_msgs(
+                job["error"],
+                "Job execution entered an unknown state",
+            )
+            conn.execute(
+                """UPDATE jobs SET 
+                    job_status='FAILED', 
+                    error=?, updated_at=? WHERE id=?""",
+                (error_message, now_iso, job_id),
+            )
+            return
+
+    return
 
 
 def lease_due_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -499,12 +667,13 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row):
         export_task = exportTask_from_db_row(db_task)
         export_task.query_status()
         new_task_status = export_task.task_status
+        new_error = export_task.error
         new_db_export_state = _map_export_task_to_db_state(export_task)
 
     except Exception as e:
         # Not Normal: Backoff if error in getting status - Try again later
         conn.execute(
-            """UPDATE exports SET attempts=attempts+1, poll_interval_sec=?, next_check_at=?, last_error=?, updated_at=? WHERE id = ?""",
+            """UPDATE exports SET attempts=attempts+1, poll_interval_sec=?, next_check_at=?, error=?, updated_at=? WHERE id = ?""",
             (
                 next_poll_interval,
                 next_check_at,
@@ -532,7 +701,7 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row):
         case "COMPLETED":
             # Normal: Task completed successfully
             conn.execute(
-                """UPDATE exports SET state = 'COMPLETED', task_status=?, last_error = NULL, updated_at=? WHERE id = ?""",
+                """UPDATE exports SET state = 'COMPLETED', task_status=?, error = NULL, updated_at=? WHERE id = ?""",
                 (
                     new_task_status,
                     now_iso,
@@ -542,14 +711,14 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row):
         case "FAILED":
             # Not Normal: Task failed - Mark as FAILED
             conn.execute(
-                """UPDATE exports SET state = 'FAILED', task_status=?, updated_at=?, last_error = ? WHERE id = ?""",
-                (new_task_status, now_iso, export_task.error, db_task["id"]),
+                """UPDATE exports SET state = 'FAILED', task_status=?, updated_at=?, error = ? WHERE id = ?""",
+                (new_task_status, now_iso, new_error, db_task["id"]),
             )
         case _:
             # Not Normal: Unknown state - Mark as UNKNOWN and log error
             # Try again until we hit deadline
             conn.execute(
-                """UPDATE exports SET state = 'UNKNOWN', task_status=?, next_check_at=?, updated_at=?, last_error = ? WHERE id = ?""",
+                """UPDATE exports SET state = 'UNKNOWN', task_status=?, next_check_at=?, updated_at=?, error = ? WHERE id = ?""",
                 (
                     new_task_status,
                     next_check_at,
@@ -561,9 +730,10 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row):
 
 
 def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
-
+    logger.debug(f"Starting image export procedure")
     job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
 
+    # Only Execute on PENDING, anything else means this already ran
     if job["image_export_status"] != "PENDING":
         return
 
@@ -586,7 +756,7 @@ def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
 
     except Exception as e:
         # Mark Job as FAILED if monthly export doesn't complete
-        logger.error(f"Error during monthly export: {e}")
+        logger.error(f"Error during monthly image export: {e}")
         error_msg = _join_error_msgs(job["error"], str(e))
         conn.execute(
             """UPDATE jobs SET 
@@ -598,13 +768,25 @@ def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
         return
 
     if len(export_tasks) == 0:
-        image_export_status = "NOT_REQUIRED"
+        image_export_status = "COMPLETED"
+        stats_export_status = "NOT_REQUIRED"
+        logger.info("No image exports generated for this job")
     else:
         image_export_status = "RUNNING"
+        stats_export_status = "PENDING"
+        logger.info(f"Generated {len(export_tasks)} image export tasks")
 
     conn.execute(
-        "UPDATE jobs SET image_export_status = ?, updated_at = ? WHERE id = ?",
-        (image_export_status, db.datetime_to_iso(db.utc_now()), job_id),
+        """UPDATE jobs SET 
+            image_export_status = ?, 
+            stats_export_status = ?,
+            updated_at = ? WHERE id = ?""",
+        (
+            image_export_status,
+            stats_export_status,
+            db.datetime_to_iso(db.utc_now()),
+            job_id,
+        ),
     )
 
     if export_tasks:
@@ -615,18 +797,19 @@ def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
                 inserted_tasks += 1
             except Exception as e:
                 logger.error(f"Error saving task to database - {task.name}: {e}")
-        logger.info(
-            f"Inserted {inserted_tasks} out of {len(export_tasks)} into the database."
+        logger.debug(
+            f"Inserted {inserted_tasks} out of {len(export_tasks)} tasks in database."
         )
 
         if inserted_tasks < len(export_tasks):
             error_msg = _join_error_msgs(
                 job["error"],
-                f"Failed to insert {len(export_tasks) - inserted_tasks} image tasks in db.",
+                f"Failed to insert {len(export_tasks) - inserted_tasks} image tasks in db. Check GGE tasks for any pending tasks",
             )
             conn.execute(
-                """UPDATE jobs SET stats_export_status='FAILED',
-            error=?, updated_at=? WHERE id=?""",
+                """UPDATE jobs SET 
+                    stats_export_status='FAILED',
+                    error=?, updated_at=? WHERE id=?""",
                 (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
             )
 
@@ -637,38 +820,47 @@ def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
 def auto_stats_export(
     conn: sqlite3.Connection, job_id: str, settings: dict, storage_conn
 ):
+    logger.debug(f"Starting stats export procedure")
+
     now_iso = db.datetime_to_iso(db.utc_now())
     job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    job_images = conn.execute(
+        """SELECT count(*) as count 
+            FROM exports 
+            WHERE job_id=? AND state='RUNNING'""",
+        (job_id,),
+    ).fetchone()
+
+    pending_job_images = job_images["count"] if job_images else 0
 
     # Skip if job is not RUNNING or image exports are not COMPLETED or stats exports is not PENDING
     if (
         job["job_status"] != "RUNNING"
-        or job["image_export_status"] in ("PENDING", "RUNNING")
         or job["stats_export_status"] != "PENDING"
+        or pending_job_images > 0
     ):
         return
 
-    #! Simulate ExportTaskList - Replace with actual logic to create stats export tasks
+    logger.debug(f"Starting stats exports for job: {job_id}")
     print(f"Starting stats exports for job: {job_id}")
     try:
 
         # stats_export_tasks = _dummy_stats_exportTaskList(job_id)
-        stats_export_tasks = ExportTaskList([])
-        # stats_export_tasks = tbl_monthly_export.monthly_tbl_export_proc(
-        #     settings=settings,
-        #     storage_conn=storage_conn,
-        #     storage_bucket=settings["stats_storage_bucket"],
-        #     force_overwrite=True,
-        #     skip_manifest=False,
-        # )
+        # stats_export_tasks = ExportTaskList([])
+        stats_export_tasks = tbl_monthly_export.monthly_tbl_export_proc(
+            settings=settings,
+            storage_conn=storage_conn,
+            storage_bucket=settings["storage_bucket"],
+            force_overwrite=True,
+            skip_manifest=settings["skip_manifest"],
+        )
 
     except Exception as e:
         # Mark Job as FAILED if stats export doesn't complete
-        logger.error(f"Error during stats export: {e}")
+        logger.error(f"Error executing stats export process: {e}")
         error_msg = _join_error_msgs(job["error"], str(e))
         conn.execute(
             """UPDATE jobs SET 
-                job_status = 'FAILED',
                 stats_export_status = 'FAILED', 
                 error = ?,
                 updated_at = ? WHERE id = ?""",
@@ -677,9 +869,11 @@ def auto_stats_export(
         return
 
     if len(stats_export_tasks) == 0:
-        stats_export_status = "NOT_REQUIRED"
+        stats_export_status = "COMPLETED"
+        logger.info("No stats exports generated for this job")
     else:
         stats_export_status = "RUNNING"
+        logger.info(f"Generated {len(stats_export_tasks)} stats export tasks")
 
     conn.execute(
         "UPDATE jobs SET stats_export_status = ?, updated_at = ? WHERE id = ?",
@@ -696,7 +890,7 @@ def auto_stats_export(
                 logger.error(f"Error saving task to database - {task.name}: {e}")
 
         logger.info(
-            f"Inserted {inserted_tasks} out of {len(stats_export_tasks)} into the database."
+            f"Inserted {inserted_tasks} out of {len(stats_export_tasks)} stats tasks in database."
         )
 
         if inserted_tasks < len(stats_export_tasks):
@@ -705,8 +899,9 @@ def auto_stats_export(
                 f"Failed to insert {len(stats_export_tasks) - inserted_tasks} stats tasks in db.",
             )
             conn.execute(
-                """UPDATE jobs SET job_status='FAILED', stats_export_status='FAILED',
-            error=?, updated_at=? WHERE id=?""",
+                """UPDATE jobs SET 
+                    stats_export_status='FAILED',
+                    error=?, updated_at=? WHERE id=?""",
                 (error_msg, now_iso, job_id),
             )
 
@@ -716,83 +911,143 @@ def auto_stats_export(
 
 
 # TODO: Set counter for retries of Job Reporting
-def auto_job_report(conn, job_id):
-
+def auto_job_report(conn, job_id, settings: Settings):
+    iso_now = db.datetime_to_iso(db.utc_now())
     job = conn.execute("SELECT * FROM jobs WHERE id=? LIMIT 1", (job_id,)).fetchone()
-    print(dict(job))
+    logger.debug("Starting Report Generation...")
+    print("Starting Report Generation...")
 
     # Report only if Job has finished and reporting is pending
-    if not (
-        job["job_status"] in ("COMPLETED", "FAILED")
-        and job["report_status"] in ("PENDING")
-    ):
+    # fmt: off
+    if (job["job_status"] not in ("COMPLETED", "FAILED") or 
+        job["report_status"] not in ("PENDING")):
         return
-
+    # fmt: on
+    logger.debug(f"Generating report for job [{job_id}]")
     print(f"Generating report for job [{job_id}]...")
 
-    try:
-        tasks = conn.execute(
-            "SELECT * FROM exports WHERE job_id=? ORDER BY type, state", (job_id,)
-        ).fetchall()
+    # Create new report entry if one doesn't exist
+    report_record = conn.execute(
+        "SELECT * FROM reports WHERE job_id=? LIMIT 1", (job_id,)
+    ).fetchone()
 
-        full_job = {"job": dict(job), "tasks": [dict(task) for task in tasks]}
-        print(full_job)  #! Replace with actual report generation logic
+    if not report_record:
+
         conn.execute(
-            "UPDATE jobs SET report_status='COMPLETED', updated_at=? WHERE id=?",
-            (
-                db.datetime_to_iso(db.utc_now()),
-                job_id,
-            ),
+            "INSERT INTO reports (job_id, status, attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (job_id, "PENDING", 1, iso_now, iso_now),
         )
+        report_record = conn.execute(
+            "SELECT * FROM reports WHERE job_id=? LIMIT 1", (job_id,)
+        ).fetchone()
+    else:
+        conn.execute(
+            "UPDATE reports SET attempts=attempts+1, updated_at=? WHERE id=?",
+            (iso_now, report_record["id"]),
+        )
+
+    try:
+        report_context = email.make_job_report_context(conn, job_id)
+        if settings.app.email.enable_email:
+            email_service = email.EmailService(
+                host=settings.app.email.host,  # type: ignore
+                port=settings.app.email.port,  # type: ignore
+                user=settings.app.email.user,  # type: ignore
+                password=settings.app.email.password.get_secret_value(),  # type: ignore
+            )
+            email.send_report_message(
+                email_service=email_service,
+                from_address=settings.app.email.from_address,  # type: ignore
+                to_address=settings.app.email.to_address,  # type: ignore
+                context=report_context,
+            )
+            logging.info(f"Report sent for job {job_id}")
+        else:
+            logging.info("Email reporting is disabled.")
+
     except Exception as e:
         error_msg = f"Error generating report for job {job_id}: {e}"
-        print(error_msg)
         logger.error(error_msg)
-        error_msg = _join_error_msgs(job["error"], error_msg)
         conn.execute(
-            "UPDATE jobs SET report_status='FAILED', error=?, updated_at=? WHERE id=?",
+            """UPDATE reports SET 
+            status='FAILED', last_error=?, updated_at=? 
+            WHERE id=?""",
             (
                 error_msg,
-                db.datetime_to_iso(db.utc_now()),
-                job_id,
+                iso_now,
+                report_record["id"],
             ),
         )
+        return
+
+    # No Errors, Update report status
+    conn.execute(
+        "UPDATE jobs SET report_status='COMPLETED', updated_at=? WHERE id=?",
+        (
+            iso_now,
+            job_id,
+        ),
+    )
+    conn.execute(
+        "UPDATE reports SET status='COMPLETED', updated_at=? WHERE id=?",
+        (
+            iso_now,
+            report_record["id"],
+        ),
+    )
+    return
 
 
 # TODO: instead of receiving settings, call it from within
-def auto_daily_job(settings: dict):
-    with db.db(settings["db_path"]) as conn:
-        # Create a new job
-        job_id = create_job(conn)
-    # ------ Attempt Connections ------
+def auto_job_init(settings: Settings):
+    logger.debug("Starting New Job")
+    db_path = settings.app.automation.db.db_path
+
+    # Create new Job
     try:
-        # Connect to GEE
+        with db.db(db_path) as conn:
+            # Create a new job
+            job_id = create_job(conn)
+            logger.info(f"Created new job with ID: {job_id}")
+    except Exception as e:
+        error_msg = f"Error creating daily job: {e}"
+        logger.error(error_msg)
+        raise e
+
+    # Connect to GEE
+    logger.debug("Initializing connection to GEE")
+    try:
         runtime_service_account = connections.GoogleServiceAccount(
-            settings["service_credentials_file"].as_posix(),
+            settings.app.google.credentials_file.as_posix(),
         )
         connections.connect_to_gee(runtime_service_account)
 
     except Exception as e:
         error_msg = f"Error connecting to GEE: {e}"
         logger.error(error_msg)
-        with db.db(settings["db_path"]) as conn:
+        with db.db(db_path) as conn:
             conn.execute(
                 """UPDATE jobs SET 
                     job_status = 'FAILED',
+                    image_export_status = 'FAILED',
+                    stats_export_status = 'FAILED',
                     error = ?,
                     updated_at = ? WHERE id = ?""",
                 (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
             )
+        raise e
 
-    # TODO ------ Check Assets Availability ------
+    with db.db(db_path) as conn:
+        # Save MODIS status
+        logger.debug("Saving MODIS status info")
+        _save_modis_status(conn, job_id)
 
-    with db.db(settings["db_path"]) as conn:
-        # Create a new job
-        job_id = create_job(conn)
-        auto_image_export(conn, job_id, settings)
+        # Execute Image Export
+        img_settings = {**settings.app.image_export.model_dump()}
+        auto_image_export(conn, job_id, img_settings)
 
         # Quick polling of Task status (if any were created)
-        #! Change for Auto Orchestrate
+        time.sleep(20)  # Give GEE time to react
         due_tasks = lease_due_tasks(conn)
         for db_task in due_tasks:
             update_task_status(conn, db_task)
@@ -801,53 +1056,86 @@ def auto_daily_job(settings: dict):
 
 
 # TODO: instead of receiving settings, call it from within
-def auto_orchestrate_job_updates(settings: dict):
+# TODO: Include function to rollback stats file move
+def auto_job_orchestration(settings: Settings):
+    logger.debug("Starting Job Orchestration")
     # ------ Attempt Connections ------
+    logger.debug("Initializing connection to GEE")
     try:
         # Connect to GEE
         runtime_service_account = connections.GoogleServiceAccount(
-            settings["service_credentials_file"].as_posix(),
+            settings.app.google.credentials_file.as_posix(),
         )
         connections.connect_to_gee(runtime_service_account)
-
-        # Connect to Cloud Storage
-        if settings["stats_export_target"] == "storage":
-            google_credentials = service_account.Credentials.from_service_account_info(
-                runtime_service_account.credentials
-            )
-            storage_conn = tbl_monthly_export.create_storage_client(
-                project=runtime_service_account.project_id,
-                credentials=google_credentials,
-            )
-        else:
-            storage_conn = None
 
     except Exception as e:
         error_msg = f"Error connecting to GEE: {e}"
         logger.error(error_msg)
 
-    with db.db(settings["db_path"]) as conn:
+    # Connect to Cloud Storage
+    if settings.app.stats_export.export_target == "storage":
+        logger.debug("Initializing connection to Google Cloud Storage")
+        google_credentials = service_account.Credentials.from_service_account_info(
+            runtime_service_account.credentials
+        )
+        storage_conn = tbl_monthly_export.create_storage_client(
+            project=runtime_service_account.project_id,
+            credentials=google_credentials,
+        )
+    else:
+        storage_conn = None
+
+    with db.db(settings.app.automation.db.db_path) as conn:
+        logger.debug("Initiating Orchestration")
+        print("--- Initiating Orchestration ---")
+        logger.debug("Updating Export Task Status...")
+        print("Updating Export Task Status...")
         # Update status of Pending Tasks
         due_tasks = lease_due_tasks(conn)
         for db_task in due_tasks:
             update_task_status(conn, db_task)
 
         # Orchestrate pending job steps
+        logger.debug("Updating Jobs")
+        print("Updating Jobs...")
         jobs = conn.execute(
-            "SELECT * FROM jobs WHERE job_status IN ('RUNNING')"
+            "SELECT * FROM jobs WHERE job_status IN ('RUNNING') or report_status IN ('PENDING')"
         ).fetchall()
         for job in jobs:
-            # Update Job status
-            # print(f"Updating status for job: {job['id']}")
-            # print(f"Current job status: {dict(job)}")
+            print("-----------------------------------------------------")
+            logger.debug(f"Orchestrating job: {job['id']}")
+            print(f"Orchestrating job: {job['id']}")
+
+            # Update Job Status
             update_job(conn, job["id"])
-            # updated_job = conn.execute(
-            #     "SELECT * FROM jobs WHERE id=?", (job["id"],)
-            # ).fetchone()
-            # print(f"Updated job status: {dict(updated_job)}")
+
+            # Get updated Job Status
+            job = conn.execute(
+                "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
+            ).fetchone()
+            if job["job_status"] == "RUNNING":
+                if job["image_export_status"] in ("RUNNING"):
+                    logger.debug("Image Exports are still running")
+                    print("Image Exports are still running")
+                    continue
+
+                if job["stats_export_status"] in ("RUNNING"):
+                    logger.debug("Stats Exports are still running")
+                    print("Stats Exports are still running")
+                    continue
 
             # Create Stat Export Tasks (if required)
-            auto_stats_export(conn, job["id"], settings, storage_conn)
+            stats_settings = {
+                **settings.app.stats_export.model_dump(),
+                "monthly_image_prefix": settings.app.image_export.monthly_image_prefix,
+                "yearly_image_prefix": settings.app.image_export.yearly_image_prefix,
+            }
+            auto_stats_export(conn, job["id"], stats_settings, storage_conn)
+
+            # Get updated job status
+            job = conn.execute(
+                "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
+            ).fetchone()
 
             # Generate Report
-            auto_job_report(conn, job["id"])
+            auto_job_report(conn, job["id"], settings)

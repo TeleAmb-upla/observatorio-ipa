@@ -1,6 +1,7 @@
 import ee
 import ee.batch
 import logging
+
 from gee_toolbox.gee import assets
 from datetime import date
 
@@ -13,12 +14,13 @@ from observatorio_ipa.core.defaults import (
     DEFAULT_CHI_PROJECTION,
     DEFAULT_SCALE,
 )
+from observatorio_ipa.core.config import LOGGER_NAME
 from observatorio_ipa.services.gee import dates as gee_dates
-from observatorio_ipa.processes import reclass_and_impute
+from observatorio_ipa.services.gee.processes import reclass_and_impute
 from observatorio_ipa.utils import dates as utils_dates
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(LOGGER_NAME)
 
 
 def _yearly_images_pending_export(

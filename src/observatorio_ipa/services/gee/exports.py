@@ -5,17 +5,16 @@ import copy
 import uuid
 from ee import batch as ee_batch
 from pathlib import Path
-
-
-from tomlkit import value
 import prettytable
 from typing import Literal
 from collections.abc import Iterator
+from observatorio_ipa.core.config import LOGGER_NAME
 
 # Google Drive Issue
 # https://community.latenode.com/t/getting-storage-quota-exceeded-error-403-with-google-drive-api-service-account/32433
 
-logger = logging.getLogger(__name__)
+
+logger = logging.getLogger(LOGGER_NAME)
 
 VALID_EXPORT_TARGETS = ["gee", "gdrive", "storage"]
 

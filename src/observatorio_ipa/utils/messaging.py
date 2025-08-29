@@ -1,16 +1,12 @@
 import smtplib
-from email.message import EmailMessage
-import logging
 import re
+import logging
+from email.message import EmailMessage
 from datetime import datetime
 from email_validator import validate_email, EmailNotValidError
-from observatorio_ipa import templates
-from importlib import resources
+from observatorio_ipa.core.config import LOGGER_NAME
 
-
-logger = logging.getLogger(__name__)
-
-RESULTS_EMAIL_TEMPLATE = "results_email_template.txt"
+logger = logging.getLogger(LOGGER_NAME)
 
 
 class EmailSender:
@@ -267,52 +263,52 @@ def parse_emails(emails_str: str) -> list[str]:
     return valid_emails
 
 
-def get_template(template: str, default_template: str) -> str:
-    try:
-        file = resources.files(templates) / template
-        with file.open() as f:
-            return f.read()
+# def get_template(template: str, default_template: str) -> str:
+#     try:
+#         file = resources.files(templates) / template
+#         with file.open() as f:
+#             return f.read()
 
-    except FileNotFoundError:
-        logger.error(f"Template file not found: {file}")
-        return default_template
-    except Exception as e:
-        logger.error(f"Error reading template file: {e}")
-        return default_template
+#     except FileNotFoundError:
+#         logger.error(f"Template file not found: {file}")
+#         return default_template
+#     except Exception as e:
+#         logger.error(f"Error reading template file: {e}")
+#         return default_template
 
 
-def email_results(
-    email_service: EmailSender,
-    results: str,
-    script_start_time: str | None = None,
-) -> None:
-    """
-    Send an email with export results using the provided email service.
+# def email_results(
+#     email_service: EmailSender,
+#     results: str,
+#     script_start_time: str | None = None,
+# ) -> None:
+#     """
+#     Send an email with export results using the provided email service.
 
-    Args:
-        email_service (EmailSender): An instance of EmailSender to use for sending the email.
-        script_start_time (str): The start time of the script.
-        body (str): The body of the email.
-        template (str, optional): The template to use for the email body. Defaults to "default.html".
+#     Args:
+#         email_service (EmailSender): An instance of EmailSender to use for sending the email.
+#         script_start_time (str): The start time of the script.
+#         body (str): The body of the email.
+#         template (str, optional): The template to use for the email body. Defaults to "default.html".
 
-    Returns:
-        None
+#     Returns:
+#         None
 
-    """
+#     """
 
-    if not script_start_time:
-        script_start_time = "Not logged"
-    script_end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+#     if not script_start_time:
+#         script_start_time = "Not logged"
+#     script_end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if email_service is not None:
+#     if email_service is not None:
 
-        default_template = "[results]"
-        message = get_template(RESULTS_EMAIL_TEMPLATE, default_template)
-        message = message.replace("[results]", results)
-        message = message.replace("[start_time]", script_start_time)
-        message = message.replace("[end_time]", script_end_time)
+#         default_template = "[results]"
+#         message = get_template(RESULTS_EMAIL_TEMPLATE, default_template)
+#         message = message.replace("[results]", results)
+#         message = message.replace("[start_time]", script_start_time)
+#         message = message.replace("[end_time]", script_end_time)
 
-        subject = "OSN Image Processing Automation"
-        email_service.send_email(subject=subject, body=message)
+#         subject = "OSN Image Processing Automation"
+#         email_service.send_email(subject=subject, body=message)
 
-    return
+#     return

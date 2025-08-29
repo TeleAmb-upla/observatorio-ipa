@@ -1,5 +1,5 @@
 # config.py
-import os, tomllib, copy
+import os, tomllib, copy, logging
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Literal, Any
@@ -23,6 +23,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ENV_FILE = ".env"
 LOGGER_NAME = "osn-ipa"
+TXT_REPORT_TEMPLATE = "job_template.txt"
+HTML_REPORT_TEMPLATE = "job_template.html"
+
+logger = logging.getLogger(LOGGER_NAME)
 
 # YYYY-MM format for months
 YearMonthStr = Annotated[
@@ -143,7 +147,6 @@ class LogSettings(BaseSettings):
         extra="ignore",
     )
 
-    name: Annotated[str, Field(validation_alias="")] = LOGGER_NAME
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     file: Annotated[
         Path,
@@ -329,7 +332,7 @@ class AutoDBSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
     )
-    db_path: FilePath
+    db_path: Path
 
 
 class AutoDailyJobSettings(BaseSettings):
@@ -343,13 +346,14 @@ class AutoOrchestrationSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
     )
-    cron: str = "0 3 * * *"  # Every day at 3 AM
+    interval_minutes: int = 3  # Every 3 minutes
 
 
 class AutoRunSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
     )
+    timezone: str = "UTC"
     db: AutoDBSettings
     daily_job: AutoDailyJobSettings
     orchestration_job: AutoOrchestrationSettings
@@ -364,10 +368,7 @@ class AppSettings(BaseSettings):
     @classmethod
     def fill_stats_collection_paths(cls, values: Any) -> Any:
         if not isinstance(values, dict):
-            print("Not a dictionary")
             return values
-
-        print(values)
 
         if values.get("app"):
             image_export = values["app"].get("image_export")
@@ -378,30 +379,13 @@ class AppSettings(BaseSettings):
 
         # Only set if stats_export exists and monthly_collection_path is missing or None
         if image_export and stats_export:
-            print("Both image_export and stats_export exist")
-            print(
-                f"Image Monthly Collection: {image_export.get('monthly_collection_path')}"
-            )
-            print(
-                f"Stats Monthly Collection: {stats_export.get('monthly_collection_path')}"
-            )
-            print(
-                f"Image Yearly Collection: {image_export.get('yearly_collection_path')}"
-            )
-            print(
-                f"Stats Yearly Collection: {stats_export.get('yearly_collection_path')}"
-            )
-            print(image_export)
-            print(stats_export)
 
             # Copy Monthly Collection Path
             if (
                 stats_export.get("monthly_collection_path") is None
                 and image_export.get("monthly_collection_path") is not None
             ):
-                print(
-                    "Copying monthly_collection_path from image_export to stats_export"
-                )
+
                 stats_export["monthly_collection_path"] = image_export[
                     "monthly_collection_path"
                 ]
@@ -411,13 +395,10 @@ class AppSettings(BaseSettings):
                 stats_export.get("yearly_collection_path") is None
                 and image_export.get("yearly_collection_path") is not None
             ):
-                print(
-                    "Copying yearly_collection_path from image_export to stats_export"
-                )
+
                 stats_export["yearly_collection_path"] = image_export[
                     "yearly_collection_path"
                 ]
-        print(values)
         return values
 
     google: GoogleSettings

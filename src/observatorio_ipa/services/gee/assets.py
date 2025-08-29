@@ -2,10 +2,11 @@ import logging
 import ee, ee.data
 from ee.ee_exception import EEException
 from gee_toolbox.gee.assets import ALLOWED_ASSET_TYPES
+from observatorio_ipa.core.config import LOGGER_NAME
 
 CONTAINER_ASSET_TYPES = ["FOLDER", "IMAGE_COLLECTION"]
 
-logger = logging.getLogger("observatorio_ipa." + __name__)
+logger = logging.getLogger(LOGGER_NAME)
 
 # cSpell:enableCompoundWords
 

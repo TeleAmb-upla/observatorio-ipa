@@ -1,8 +1,8 @@
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent
-DB_NAME = "observatorio_ipa.db"
+DEFAULT_DB_PATH = Path(__file__).parent
+DEFAULT_DB_NAME = "observatorio_ipa.db"
 
 DDL = """
 PRAGMA journal_mode=WAL;
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_status TEXT NOT NULL, --  RUNNING, COMPLETED, FAILED
     image_export_status TEXT NOT NULL, -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
     stats_export_status TEXT NOT NULL, -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
-    report_status TEXT NOT NULL, -- SKIP, PENDING, SENT, FAILED, 
+    report_status TEXT NOT NULL, -- SKIP, PENDING, COMPLETED, FAILED,
     email_to TEXT,
     error TEXT,
     created_at TEXT NOT NULL,
@@ -38,7 +38,6 @@ CREATE TABLE IF NOT EXISTS exports (
     poll_interval_sec INTEGER NOT NULL DEFAULT 5,
     attempts INTEGER NOT NULL DEFAULT 0,
     deadline_at TEXT,
-    last_error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
@@ -48,14 +47,44 @@ CREATE INDEX IF NOT EXISTS idx_exports_job_id ON exports(job_id);
 CREATE INDEX IF NOT EXISTS idx_exports_due ON exports(state, next_check_at);
 CREATE INDEX IF NOT EXISTS idx_exports_lease ON exports(lease_until);
 
+CREATE TABLE IF NOT EXISTS modis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    collection TEXT NOT NULL,
+    images INTEGER NOT NULL,
+    last_image TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_modis_job_id ON modis(job_id);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_job_id ON reports(job_id);
+
 """
 
 
-def create_schema(path: str | None = None) -> None:
-    if not path:
-        db_path = DB_PATH / DB_NAME
+def create_schema(path: str | Path | None = None) -> None:
+    if path:
+        db_path = Path(path).expanduser().resolve()
+        if db_path.suffix == "":
+            db_path = db_path / DEFAULT_DB_NAME
     else:
-        db_path = Path(path) / DB_NAME
+        db_path = (DEFAULT_DB_PATH / DEFAULT_DB_NAME).resolve()
+
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(DDL)

@@ -1,6 +1,10 @@
 [app.google]
 credentials_file = "path/to/credentials.json"
 
+###########################################################
+#                 EMAIL                                   #
+###########################################################
+
 [app.email]
 enable_email = false
 # host = "smtp.example.com"
@@ -11,13 +15,21 @@ enable_email = false
 # from_address = "from@example.com"
 # to_address = ["to@example.com"]
 
+###########################################################
+#                   LOGGING                               #
+###########################################################
+
 [app.logging]
 name = "osn-ipa"
 level = "INFO"
-file = "logs/osn_ipa.log"
+file = "/var/logs/observatorio_ipa/osn_ipa.log"
 encoding = "utf-8"
 format = "%(asctime)s %(name)s %(levelname)s: %(message)s"
 date_format = "%Y-%m-%d %H:%M:%S"
+
+###########################################################
+#                  IMAGE EXPORT                           #
+###########################################################
 
 [app.image_export]
 monthly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly_Monthly"
@@ -30,9 +42,15 @@ dem_asset_path = "projects/ee-observatorionieves/assets/Modules/DEM_SRTM_reproj_
 # months_list = []
 # years_list = []
 
+###########################################################
+#                  STATS EXPORT                           #
+###########################################################
+
 [app.stats_export]
 # monthly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly_Monthly"
+# MISSING> monthly_image_prefix
 # yearly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly"
+# MISSING> yearly_image_prefix
 basins_asset_path = "users/observatorionieves/DGA/Cuencas_BNA_Oficial"
 macrozones_asset_path = "users/observatorionieves/DGA/Macrozonas_BNA_Oficial"
 basins_cd_property = "COD_CUEN"
@@ -81,12 +99,19 @@ sca_y_t_elev_basin_tbl_prefix = "SCA_y_t_elev_BNA_"
 snowline_y_basin_tbl_prefix = "snowline_y_BNA_"
 
 # ----- stats manifest -----
-manifest_source = "file"        # file or storage
-manifest_path = "../manifests/"
+manifest_source = "file"                               # file or storage
+manifest_path = "/var/lib/observatorio_ipa/manifests/"
 skip_manifest = false
 
+###########################################################
+#                     AUTOMATION                          #
+###########################################################
+
+[app.automation]
+timezone = "UTC"
+
 [app.automation.db]
-db_path = "path/to/observatorio_ipa.db"
+db_path = "/var/lib/observatorio_ipa/observatorio_ipa.db"
 
 [app.automation.daily_job]
 cron = "0 2 * * *"

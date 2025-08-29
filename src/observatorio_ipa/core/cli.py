@@ -15,12 +15,12 @@ def parse_cli_args():
 
     # Source of environment variables
     parser.add_argument(
-        "-e",
-        "--env-file",
-        dest="env_file",
-        default=os.getenv("IPA_ENV_FILE", ".env"),
+        "-t",
+        "--toml-file",
+        dest="toml_file",
+        default=os.getenv("IPA_CONFIG_FILE", ""),
         type=str,
-        help="Path to .env file containing configuration parameters.",
+        help="Path to .toml file containing configuration parameters.",
     )
 
     args = parser.parse_args()

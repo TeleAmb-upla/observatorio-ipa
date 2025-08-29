@@ -1,44 +1,44 @@
 import logging
-from observatorio_ipa.core.config import LogSettings
+from observatorio_ipa.core.config import LogSettings, LOGGER_NAME
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(LOGGER_NAME)
 
 
-def update_logs_config(config: dict | None = None) -> dict:
-    """
-    Update the default logging configuration with a provided configuration.
-    Args:
-        config (dict): A dictionary containing the configuration values.
-    Returns:
-        dict: A dictionary containing the updated logging configuration.
-    """
-    config = config.copy() if config else {}
-    default_config = DEFAULT_LOGGING_CONFIG.copy()
+# def update_logs_config(config: dict | None = None) -> dict:
+#     """
+#     Update the default logging configuration with a provided configuration.
+#     Args:
+#         config (dict): A dictionary containing the configuration values.
+#     Returns:
+#         dict: A dictionary containing the updated logging configuration.
+#     """
+#     config = config.copy() if config else {}
+#     default_config = DEFAULT_LOGGING_CONFIG.copy()
 
-    config_options = {
-        "log_level": None,
-        "log_file": None,
-    }
+#     config_options = {
+#         "log_level": None,
+#         "log_file": None,
+#     }
 
-    if config:
-        # set log level to Info if config["log_level"] is not valid
-        if "log_level" in config:
-            if config["log_level"] not in ("DEBUG", "INFO", "WARNING", "ERROR"):
-                config["log_level"] = "INFO"
+#     if config:
+#         # set log level to Info if config["log_level"] is not valid
+#         if "log_level" in config:
+#             if config["log_level"] not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+#                 config["log_level"] = "INFO"
 
-        for key in config_options:
-            if key in config:
-                config_options[key] = config[key]
+#         for key in config_options:
+#             if key in config:
+#                 config_options[key] = config[key]
 
-    if config_options["log_level"]:
-        default_config["loggers"]["observatorio_ipa"]["level"] = config_options[
-            "log_level"
-        ]
+#     if config_options["log_level"]:
+#         default_config["loggers"]["observatorio_ipa"]["level"] = config_options[
+#             "log_level"
+#         ]
 
-    if config_options["log_file"]:
-        default_config["handlers"]["file"]["filename"] = config_options["log_file"]
+#     if config_options["log_file"]:
+#         default_config["handlers"]["file"]["filename"] = config_options["log_file"]
 
-    return default_config
+#     return default_config
 
 
 def get_log_level(log_level: str = "INFO") -> int | None:
@@ -69,7 +69,9 @@ def init_logging_config(
     It configures the logging format, date format, and log file location.
     """
 
-    new_logger = logging.getLogger(config.name)
+    from observatorio_ipa.core.config import LOGGER_NAME
+
+    new_logger = logging.getLogger(LOGGER_NAME)
     new_logger.setLevel(config.level)
 
     # Formatters
