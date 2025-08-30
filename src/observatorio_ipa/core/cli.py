@@ -18,7 +18,7 @@ def parse_cli_args():
         "-t",
         "--toml-file",
         dest="toml_file",
-        default=os.getenv("IPA_CONFIG_FILE", ""),
+        default=os.getenv("IPA_CONFIG_TOML", ""),
         type=str,
         help="Path to .toml file containing configuration parameters.",
     )

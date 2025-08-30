@@ -50,9 +50,10 @@ def main():
 
     # Load settings
     toml_file = cli_args.get("toml_file", "")
+    toml_file = toml_file.strip("'\"")  # clean quotes if any
     if not toml_file:
         raise SystemExit(
-            "Config error: IPA_SETTINGS_TOML env var or --toml argument required."
+            "Config error: IPA_CONFIG_TOML env var or --toml argument required."
         )
 
     toml_file = Path(toml_file)
