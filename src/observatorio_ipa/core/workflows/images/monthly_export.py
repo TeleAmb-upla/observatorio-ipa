@@ -1,12 +1,10 @@
 import logging
 import re
-from pathlib import Path
 import ee
 import ee.batch
-
+from pathlib import Path
 from gee_toolbox.gee import assets
 from datetime import date
-from dateutil.relativedelta import relativedelta
 
 from observatorio_ipa.core.config import LOGGER_NAME
 from observatorio_ipa.core.defaults import (
@@ -271,7 +269,7 @@ def monthly_img_export_proc(
     monthly_collection_path: str,
     aoi_path: str,
     dem_path: str,
-    name_prefix: str,
+    name_prefix: str | None = None,
     months_list: list[str] | None = None,
 ) -> dict:
     """Workflow to export monthly images with Cloud and Snow TAC bands.
@@ -305,7 +303,10 @@ def monthly_img_export_proc(
     logger.debug("Starting Monthly Image Export Process")
 
     # Fix name prefix
-    name_prefix = _fix_name_prefix(name_prefix)
+    if name_prefix:
+        name_prefix = _fix_name_prefix(name_prefix)
+    else:
+        name_prefix = ""
 
     results_dict = {
         "frequency": "monthly",

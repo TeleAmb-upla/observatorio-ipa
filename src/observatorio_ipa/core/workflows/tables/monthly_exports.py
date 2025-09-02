@@ -1,3 +1,4 @@
+# Rollback helper: record file transfers for rollback
 import re, json, logging
 from pathlib import Path
 from datetime import datetime, date
@@ -5,6 +6,7 @@ import ee
 from gee_toolbox.gee import assets
 from google.cloud import storage
 from observatorio_ipa.services.gee.exports import ExportTaskList
+from observatorio_ipa.utils import db
 from observatorio_ipa.core.config import LOGGER_NAME
 from observatorio_ipa.core.workflows.images.monthly_export import _fix_name_prefix
 from observatorio_ipa.services.gee.processes.stats.basins import (
@@ -455,8 +457,10 @@ def monthly_tbl_export_proc(
     skip_manifest: bool = False,
 ) -> ExportTaskList:
 
+    logger.debug("Starting monthly table export process")
     # Compare List of monthly Images to Manifest
     if not skip_manifest:
+        logger.debug("Checking manifest")
         if not force_overwrite and not compare_manifest_to_collection(
             manifest_src=settings["manifest_source"],
             manifest_path=settings["manifest_path"],
@@ -518,7 +522,7 @@ def monthly_tbl_export_proc(
     ###########################################
     # CREATE EXPORTS
     ###########################################
-
+    logger.debug("Creating export tasks")
     # Refactor export table names if pre_prefix required
     common_tbl_prefix = settings.get("common_tbl_pre_prefix", "")
     tbl_names = {k: v for k, v in settings.items() if k.endswith("_tbl_prefix")}
@@ -554,7 +558,9 @@ def monthly_tbl_export_proc(
     }
 
     joined_export_tasks = ExportTaskList()
+
     # ---------- ELEVATION STATISTICS -----------
+    logger.debug("Creating elevation export tasks")
     full_elev_export_path = Path(
         settings["base_export_path"], settings["elevation_tbl_export_path"]
     )
@@ -563,8 +569,8 @@ def monthly_tbl_export_proc(
         "archive",
         settings["elevation_tbl_export_path"],
     )
-    print(f"Elevation Export Path: {full_elev_export_path}")
-    print(f"Elevation Archive Path: {archive_elev_export_path}")
+    logger.debug(f"Elevation Export Path: {full_elev_export_path}")
+    logger.debug(f"Elevation Archive Path: {archive_elev_export_path}")
 
     elev_export_tasks = ExportTaskList()
     elevation_common_args = {
@@ -600,6 +606,8 @@ def monthly_tbl_export_proc(
     joined_export_tasks.extend(elev_export_tasks)
 
     # ---------- MONTH STATISTICS -----------
+    logger.debug("Creating month export tasks")
+
     full_month_export_path = Path(
         settings["base_export_path"], settings["month_tbl_export_path"]
     )
@@ -608,8 +616,8 @@ def monthly_tbl_export_proc(
         "archive",
         settings["month_tbl_export_path"],
     )
-    print(f"Month Export Path: {full_month_export_path}")
-    print(f"Month Archive Path: {archive_month_export_path}")
+    logger.debug(f"Month Export Path: {full_month_export_path}")
+    logger.debug(f"Month Archive Path: {archive_month_export_path}")
 
     month_export_tasks = ExportTaskList()
     month_common_args = {
@@ -650,6 +658,8 @@ def monthly_tbl_export_proc(
     joined_export_tasks.extend(month_export_tasks)
 
     # ---------- MONTHLY STATISTICS -----------
+    logger.debug("Creating year-month export tasks")
+
     full_monthly_export_path = Path(
         settings["base_export_path"], settings["year_month_tbl_export_path"]
     )
@@ -658,8 +668,8 @@ def monthly_tbl_export_proc(
         "archive",
         settings["year_month_tbl_export_path"],
     )
-    print(f"Monthly Export Path: {full_monthly_export_path}")
-    print(f"Monthly Archive Path: {archive_monthly_export_path}")
+    logger.debug(f"Monthly Export Path: {full_monthly_export_path}")
+    logger.debug(f"Monthly Archive Path: {archive_monthly_export_path}")
 
     monthly_export_tasks = ExportTaskList()
     year_month_common_args = {
@@ -707,6 +717,8 @@ def monthly_tbl_export_proc(
     joined_export_tasks.extend(monthly_export_tasks)
 
     # ---------- YEAR STATISTICS -----------
+    logger.debug("Creating year export tasks")
+
     full_year_export_path = Path(
         settings["base_export_path"], settings["year_tbl_export_path"]
     )
@@ -715,8 +727,8 @@ def monthly_tbl_export_proc(
         "archive",
         settings["year_tbl_export_path"],
     )
-    print(f"Year Export Path: {full_year_export_path}")
-    print(f"Year Archive Path: {archive_year_export_path}")
+    logger.debug(f"Year Export Path: {full_year_export_path}")
+    logger.debug(f"Year Archive Path: {archive_year_export_path}")
 
     year_export_tasks = ExportTaskList()
     year_common_args = {
@@ -743,6 +755,7 @@ def monthly_tbl_export_proc(
     joined_export_tasks.extend(year_export_tasks)
 
     # Start Exports
+    logger.debug("Starting export tasks")
     joined_export_tasks.start_exports()
 
     ####################################
@@ -751,6 +764,7 @@ def monthly_tbl_export_proc(
     if skip_manifest:
         return joined_export_tasks
 
+    logger.debug("Updating manifest")
     # Identify exports that started successfully
     tasks_started = [
         task for task in joined_export_tasks if task.status in ["PENDING", "COMPLETED"]
@@ -795,6 +809,7 @@ def monthly_tbl_export_proc(
         },
     )
 
+    logger.debug(f"Saving manifest to {settings['manifest_source']}")
     save_manifest(
         target=settings["manifest_source"],
         manifest_path=settings["manifest_path"],

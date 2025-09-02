@@ -11,9 +11,10 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     job_status TEXT NOT NULL, --  RUNNING, COMPLETED, FAILED
-    image_export_status TEXT NOT NULL, -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
-    stats_export_status TEXT NOT NULL, -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
-    report_status TEXT NOT NULL, -- SKIP, PENDING, COMPLETED, FAILED,
+    image_export_status TEXT NOT NULL DEFAULT 'PENDING', -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
+    stats_export_status TEXT NOT NULL DEFAULT 'PENDING', -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
+    website_update_status TEXT NOT NULL DEFAULT 'PENDING', -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
+    report_status TEXT NOT NULL DEFAULT 'PENDING', -- SKIP, PENDING, COMPLETED, FAILED,
     email_to TEXT,
     error TEXT,
     created_at TEXT NOT NULL,
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS exports (
     poll_interval_sec INTEGER NOT NULL DEFAULT 5,
     attempts INTEGER NOT NULL DEFAULT 0,
     deadline_at TEXT,
+    timezone TEXT NOT NULL DEFAULT 'UTC',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
@@ -73,6 +75,38 @@ CREATE TABLE IF NOT EXISTS reports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_job_id ON reports(job_id);
+
+CREATE TABLE IF NOT EXISTS website_updates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING, COMPLETED, FAILED
+    pull_request_id TEXT,
+    pull_request_url TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_websites_job_id ON website_updates(job_id);
+
+
+CREATE TABLE IF NOT EXISTS file_transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    export_id TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    destination_path TEXT NOT NULL,
+    status TEXT NOT NULL,    --MOVED, NOT_MOVED, ROLLED_BACK
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+    FOREIGN KEY (export_id) REFERENCES exports(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_transfers_job_id ON file_transfers(job_id);
+CREATE INDEX IF NOT EXISTS idx_file_transfers_export_id ON file_transfers(export_id);
 
 """
 

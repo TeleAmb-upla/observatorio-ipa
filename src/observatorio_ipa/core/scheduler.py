@@ -3,15 +3,14 @@ from __future__ import annotations
 import logging, signal, sys, os
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from datetime import datetime, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
 from observatorio_ipa.core import config, cli, setup_db
-from observatorio_ipa.core.config import LOGGER_NAME
+from observatorio_ipa.core.config import LOGGER_NAME, Settings
 from observatorio_ipa.core.scripting import parse_to_bool
-from observatorio_ipa.core.workflows.automation import (
+from observatorio_ipa.core.workflows.automation.orchestration import (
     auto_job_init,
     auto_job_orchestration,
 )
@@ -31,13 +30,13 @@ def parse_cron_expr(expr: str) -> CronTrigger:
     return CronTrigger(minute=minute, hour=hour, day=day, month=month, day_of_week=dow)
 
 
-def job_create(settings):
+def _job_create(settings: Settings) -> None:
     logger.info("create_jobs: start")
     auto_job_init(settings)
     logger.info("create_jobs: end")
 
 
-def job_poll(settings):
+def _job_poll(settings: Settings) -> None:
     logger.info("poll_and_orchestrate: start")
     auto_job_orchestration(settings)
     logger.info("poll_and_orchestrate: end")
@@ -100,7 +99,7 @@ def main():
     else:
         raise SystemExit("Config error: cron for Job execution must be set.")
     sched.add_job(
-        func=job_create,
+        func=_job_create,
         trigger=cron_trigger,
         kwargs={"settings": runtime_settings},
         id="auto_daily_job",
@@ -115,7 +114,7 @@ def main():
     )
 
     sched.add_job(
-        func=job_poll,
+        func=_job_poll,
         trigger=IntervalTrigger(minutes=interval_minutes),
         kwargs={"settings": runtime_settings},
         id="auto_orchestration",

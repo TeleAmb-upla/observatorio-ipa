@@ -1,14 +1,25 @@
-import sqlite3, logging, random, datetime, time
+import sqlite3, logging, random, time, re, pytz
+from datetime import datetime, date
+from pathlib import Path
 from google.oauth2 import service_account
+from google.cloud import storage
 import ee.batch
+from observatorio_ipa.core.workflows.automation.reporting import auto_job_report
 from observatorio_ipa.utils import db
-from observatorio_ipa.core.config import Settings, LOGGER_NAME
+from observatorio_ipa.core.config import (
+    Settings,
+    ImageExportSettings,
+    StatsExportSettings,
+    LOGGER_NAME,
+)
 from observatorio_ipa.core.workflows.images import monthly_export
 from observatorio_ipa.core.workflows.tables import monthly_exports as tbl_monthly_export
+from observatorio_ipa.core.workflows.automation.website_update import (
+    auto_website_update,
+)
 from observatorio_ipa.services.gee.exports import ExportTaskList, ExportTask
 from observatorio_ipa.services.gee import dates as gee_dates
 from observatorio_ipa.services import connections
-from observatorio_ipa.services.messaging import email
 from observatorio_ipa.core.defaults import (
     DEFAULT_TERRA_COLLECTION,
     DEFAULT_AQUA_COLLECTION,
@@ -73,6 +84,7 @@ def _rand_task_state_testing() -> str:
 
 
 def _dummy_stats_exportTaskList(job_id: str) -> ExportTaskList:
+    """Create a ExportTaskList with dummy table ExportTasks"""
     dummy_stat_task1 = ExportTask(
         type="table",
         name=f"stats_task_{job_id}",
@@ -91,7 +103,8 @@ def _dummy_stats_exportTaskList(job_id: str) -> ExportTaskList:
     return ExportTaskList([dummy_stat_task1, dummy_stat_task2])
 
 
-def _print_job(conn, job_id):
+def _print_job(conn: sqlite3.Connection, job_id: str) -> None:
+    """Print first 8 characters of job_id and job details"""
     job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     job_dict = dict(job)
     job_dict["id"] = job["id"][0:7]
@@ -99,6 +112,7 @@ def _print_job(conn, job_id):
 
 
 def _join_error_msgs(msg1: str | None, msg2: str | None) -> str | None:
+    """Join two error messages into one, separated by ' | '."""
     if not msg1 and not msg2:
         return None
     error_msg = (msg1 or "").strip() + " | " + (msg2 or "").strip()
@@ -108,7 +122,7 @@ def _join_error_msgs(msg1: str | None, msg2: str | None) -> str | None:
 def add_exportTask_to_db(
     conn: sqlite3.Connection, job_id: str, export_task: ExportTask
 ) -> None:
-    """Add an ExportTask to the database."""
+    """Add an ExportTask to 'exports' database table."""
 
     now_iso = db.datetime_to_iso(db.utc_now())
     db_task_state = _map_export_task_to_db_state(export_task)
@@ -138,24 +152,29 @@ def add_exportTask_to_db(
     )
 
 
-def create_job(conn: sqlite3.Connection) -> str:
-    """Create a new job in the database.
+def create_job(conn: sqlite3.Connection, timezone: str) -> str:
+    """Creates and adds a new job to 'jobs' database table.
+    Args:
+        conn (sqlite3.Connection): The database connection.
+        timezone (str): a valid timezone.
 
     Returns:
         str: The ID of the newly created job (UUID).
     """
+    # Check timezone validity
+    if timezone not in pytz.all_timezones:
+        raise ValueError(f"Invalid timezone: {timezone}")
+
     now = db.utc_now()
     job_id = db.new_id()
 
     conn.execute(
-        """INSERT INTO jobs (id, job_status, image_export_status, stats_export_status, report_status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO jobs (id, job_status, timezone, created_at, updated_at)
+        VALUES (?, ?, ?, ?)""",
         (
             job_id,
             "RUNNING",
-            "PENDING",
-            "PENDING",
-            "PENDING",
+            timezone,
             db.datetime_to_iso(now),
             db.datetime_to_iso(now),
         ),
@@ -163,7 +182,7 @@ def create_job(conn: sqlite3.Connection) -> str:
     return job_id
 
 
-def _get_state_of_tasks(conn, job_id, type) -> list[str]:
+def _get_state_of_tasks(conn: sqlite3.Connection, job_id: str, type: str) -> list[str]:
     """
     Get the state of tasks for a specific job and type.
 
@@ -181,7 +200,8 @@ def _get_state_of_tasks(conn, job_id, type) -> list[str]:
     return [r["state"] for r in rows]
 
 
-def _save_modis_status(conn, job_id):
+def _save_modis_status(conn: sqlite3.Connection, job_id: str) -> None:
+    """Saves the MODIS Terra and Aqua image collection status to 'modis' database table."""
     now_iso = db.datetime_to_iso(db.utc_now())
     ee_terra_ic = ee.imagecollection.ImageCollection(DEFAULT_TERRA_COLLECTION)
     ee_aqua_ic = ee.imagecollection.ImageCollection(DEFAULT_AQUA_COLLECTION)
@@ -221,9 +241,8 @@ def _save_modis_status(conn, job_id):
         )
 
 
-# TODO: Review Job Status logic
-def update_job(conn, job_id) -> None:
-    """Updates the job based on the status of image and stat exports"""
+def update_job(conn: sqlite3.Connection, job_id: str) -> None:
+    """Updates the job statuses based on the statuses of associated export tasks."""
 
     # print(f"Updating status for job {job_id}")
 
@@ -315,8 +334,8 @@ def update_job(conn, job_id) -> None:
                 return
 
         case "FAILED":
-            # Do Nothing - Something set the Failed state - leave as is
-            return
+            # Do Nothing - Something set the Failed state - leave as is - Continue to Stats
+            pass
 
         case "COMPLETED":
             if not image_states:
@@ -471,8 +490,8 @@ def update_job(conn, job_id) -> None:
                 return
 
         case "FAILED":
-            # Do Nothing - Something set the Failed state - leave as is
-            return
+            # Do Nothing - Something set the Failed state - leave as is - Continue
+            pass
 
         case "COMPLETED":
             if not table_states:
@@ -515,10 +534,88 @@ def update_job(conn, job_id) -> None:
             )
             return
 
-    # -------------- JOB_STATUS --------------
+    # ---------- WEBSITE_UPDATE_STATUS ----------
     # Sanity check in case I missed something above
     # fmt: off
     if (job["stats_export_status"] in ["NOT_REQUIRED", "PENDING", "RUNNING"] or 
+    any(s == "RUNNING" for s in image_states) or 
+    any(s == "RUNNING" for s in table_states)):
+        return
+    # fmt: on
+
+    # Fetch website update tasks
+    website_job = conn.execute(
+        "SELECT * FROM website_updates WHERE job_id=?",
+        (job_id,),
+    ).fetchone()
+
+    # Stop if website update task hasn't been created. Run - Auto_website_update()
+    if not website_job:
+        return
+
+    match website_job["status"]:
+        case "PENDING" | "RUNNING":
+            if website_job["status"] != job["website_update_status"]:
+                # Update status in Job
+                conn.execute(
+                    """UPDATE jobs SET 
+                        website_update_status=?, updated_at=? 
+                        WHERE id=?""",
+                    (website_job["status"], now_iso, job_id),
+                )
+                return
+            else:
+                # Still running, do nothing
+                return
+
+        case "COMPLETED":
+            if website_job["status"] != job["website_update_status"]:
+                # Update status in Job
+                conn.execute(
+                    """UPDATE jobs SET 
+                        website_update_status=?, updated_at=? 
+                        WHERE id=?""",
+                    (website_job["status"], now_iso, job_id),
+                )
+                return
+            else:
+                # Completed, move on to Job Status Update
+                pass
+
+        case "FAILED":
+            if website_job["status"] != job["website_update_status"]:
+                # Update status in Job
+                error_message = _join_error_msgs(
+                    job["error"],
+                    website_job["last_error"],
+                )
+                conn.execute(
+                    """UPDATE jobs SET 
+                        website_update_status=?, error=?, updated_at=? 
+                        WHERE id=?""",
+                    (website_job["status"], error_message, now_iso, job_id),
+                )
+                return
+            else:
+                # Completed, move on to Job Status Update
+                pass
+
+        case _:
+            # Not Normal: Unknown state: Set as failed
+            error_message = "Program produced an abnormal state while running Website update procedure."
+            conn.execute(
+                """UPDATE website_updates SET 
+                    status='FAILED', 
+                    last_error=?, updated_at=? 
+                    WHERE job_id=?""",
+                (error_message, now_iso, job_id),
+            )
+            return
+
+    # -------------- JOB_STATUS --------------
+    # Sanity check in case I missed something above
+    # fmt: off
+    if (job["website_update_status"] in ["PENDING", "RUNNING"] or 
     any(s == "RUNNING" for s in image_states) or 
     any(s == "RUNNING" for s in table_states)):
         return
@@ -529,6 +626,7 @@ def update_job(conn, job_id) -> None:
             if (
                 job["image_export_status"] == "FAILED"
                 or job["stats_export_status"] == "FAILED"
+                or job["website_update_status"] == "FAILED"
             ):
                 # Not Normal: If any exports failed, set to "FAILED"
                 # No error message required, should have been set in image or stats updates
@@ -568,7 +666,7 @@ def update_job(conn, job_id) -> None:
     return
 
 
-def lease_due_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def _lease_due_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """
     Returns a list of tasks that are due for status check.
 
@@ -606,7 +704,10 @@ def lease_due_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def exportTask_from_db_row(db_row: sqlite3.Row) -> ExportTask:
-    """Creates an ExportTask from a db export row"""
+    """Creates an ExportTask from a db export row
+
+    Expects a sqlite3.Row object set with 'sqlite3.Connection.row_factory = sqlite3.Row'.
+    """
 
     # TODO: Change DB type to match ee.batch.Task.Type
     try:
@@ -637,7 +738,19 @@ def exportTask_from_db_row(db_row: sqlite3.Row) -> ExportTask:
     )
 
 
-def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row):
+# TODO: Review deadline_at usage for tasks
+def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row) -> None:
+    """Updates the status of a GEE task and saves status in 'tasks' database table.
+
+    Given a sqlite3.Row (query row) object representing a task, will convert to
+    an ExportTask object, query GEE tasks for current status and update database
+    accordingly
+
+    args:
+        conn (sqlite3.Connection): Database connection object.
+        db_task (sqlite3.Row): Database row representing the task to update.
+
+    """
     now = db.utc_now()
     now_iso = db.datetime_to_iso(now)
     next_poll_interval = db.next_backoff(db_task["poll_interval_sec"])
@@ -648,10 +761,7 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row):
         return
 
     #! deadline_at is not set anywhere, needs review
-    if (
-        db_task["deadline_at"]
-        and datetime.datetime.fromisoformat(db_task["deadline_at"]) < now
-    ):
+    if db_task["deadline_at"] and datetime.fromisoformat(db_task["deadline_at"]) < now:
         print(
             f"Task {db_task['id']} is past its deadline. updating status to TIMED_OUT"
         )
@@ -729,7 +839,212 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row):
             )
 
 
-def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
+def record_file_transfers(
+    conn: sqlite3.Connection,
+    job_id: str,
+    export_tasks: ExportTaskList,
+    base_export_path: str | Path,
+    storage_conn: storage.Client,
+    storage_bucket: str,
+) -> None:
+    """
+    For each ExportTask, insert into 'file_transfers' the mapping from the archive version to the current version.
+    This allows rollback to the previous file if needed.
+
+    Args:
+        conn: sqlite3.Connection
+        job_id: str
+        export_id: str
+        files: list of file paths (str or Path)
+        base_export_path: the base path in storage (str or Path)
+    """
+    iso_now = db.datetime_to_iso(db.utc_now())
+    base_export_path = Path(base_export_path)
+    for task in export_tasks:
+        file = Path(task.path, task.name)
+        export_id = task.id
+        # Compute relative path to base_export_path
+        try:
+            rel_path = file.relative_to(base_export_path)
+        except ValueError:
+            rel_path = file.name  # fallback: just the file name
+
+        # Determine bucket and storage client from settings or arguments
+        # For this function, expect storage_conn and storage_bucket in settings or as globals
+        # We'll try to get them from globals if not passed
+        bucket = storage_conn.bucket(storage_bucket)
+
+        # 1. Check if the non-archived file exists in the bucket
+        active_blob_path = file.as_posix()
+        active_blob = bucket.blob(active_blob_path)
+        if active_blob.exists():
+            # set origin and target files as the same
+            conn.execute(
+                """
+                INSERT INTO file_transfers (
+                    job_id, export_id, source_path, destination_path, 
+                    status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    export_id,
+                    file.as_posix(),
+                    file.as_posix(),
+                    "NOT_MOVED",
+                    iso_now,
+                    iso_now,
+                ),
+            )
+            continue
+
+        # 2. Try today's archive file (file_LUYYYYMMDD.csv)
+        today_str = date.today().strftime("%Y%m%d")
+        archive_dir = (
+            base_export_path / "archive" / rel_path.parent
+            if isinstance(rel_path, Path)
+            else base_export_path / "archive"
+        )
+        archive_stem = file.stem
+        archive_suffix = file.suffix
+        archive_file_name = f"{archive_stem}_LU{today_str}{archive_suffix}"
+        archive_blob_path = (archive_dir / archive_file_name).as_posix()
+        archive_blob = bucket.blob(archive_blob_path)
+        if archive_blob.exists():
+            # Insert mapping into DB
+            conn.execute(
+                """
+                INSERT INTO file_transfers (
+                    job_id, export_id, source_path, destination_path, 
+                    status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    export_id,
+                    file.as_posix(),
+                    archive_blob_path,
+                    "MOVED",
+                    iso_now,
+                    iso_now,
+                ),
+            )
+            continue
+
+        # 3. If not found, list all files in archive dir matching file_LU*.csv and pick newest
+        prefix = (archive_dir / f"{archive_stem}_LU").as_posix()
+        # List blobs in archive_dir
+        blobs = list(bucket.list_blobs(prefix=archive_dir.as_posix() + "/"))
+        # Filter for files matching file_LUYYYYMMDD.csv
+        pattern = re.compile(
+            rf"{re.escape(archive_stem)}_LU(\\d{{8}}){re.escape(archive_suffix)}$"
+        )
+        candidates = []
+        for blob in blobs:
+            name = Path(blob.name).name
+            m = pattern.match(name)
+            if m:
+                candidates.append(blob.name)
+        if candidates:
+            # Pick the one with the newest date
+            candidates.sort(reverse=True)
+            newest_archived_file = candidates[0]
+            conn.execute(
+                """
+                INSERT INTO file_transfers (
+                    job_id, export_id, source_path, destination_path, 
+                    status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    export_id,
+                    file.as_posix(),
+                    newest_archived_file,
+                    "MOVED",
+                    iso_now,
+                    iso_now,
+                ),
+            )
+    conn.commit()
+
+
+# TODO: Add a rollback or adjustment to manifest
+def rollback_file_transfers(
+    conn: sqlite3.Connection,
+    job_id: str,
+    storage_conn: storage.Client,
+    storage_bucket: str,
+) -> None:
+    """
+    Rolls back file transfers for a given job by copying files from their destination paths back to their source paths.
+
+    args:
+        conn (sqlite3.Connection): Database connection object.
+        job_id (str): ID of the job to roll back.
+        storage_conn (storage.Client): Google Cloud Storage client.
+        storage_bucket (str): Name of the storage bucket.
+    """
+    logger.debug(f"Rolling back file transfers for job {job_id}")
+    db_rollback = conn.execute(
+        """
+        SELECT a.id as export_id, b.id as transfer_id, b.source_path, b.destination_path 
+        FROM exports a LEFT JOIN file_transfers b ON a.id = b.export_id
+        WHERE a.job_id = ? 
+            AND a.state = 'FAILED'
+            AND b.status = 'MOVED'
+        """,
+        (job_id,),
+    ).fetchall()
+
+    if not db_rollback:
+        return
+
+    bucket = storage_conn.bucket(storage_bucket)
+
+    for file in db_rollback:
+        original_source = file["source_path"]
+        rollback_source = file["destination_path"]
+        if not original_source or not rollback_source:
+            logger.warning(
+                f"Skipping rollback for export {file['id']} due to missing paths"
+            )
+            continue
+        try:
+            # Copy the file back to original location
+            rollback_blob = bucket.blob(rollback_source)
+            if not rollback_blob.exists():
+                logger.error(f"Rollback source file does not exist: {rollback_source}")
+                continue
+            bucket.copy_blob(rollback_blob, bucket, original_source)
+            logger.info(f"Rolled back file {original_source} from {rollback_source}")
+            conn.execute(
+                """
+                UPDATE file_transfers 
+                SET status='ROLLED_BACK', updated_at=? WHERE id=?
+                """,
+                (db.datetime_to_iso(db.utc_now()), file["transfer_id"]),
+            )
+        except Exception as e:
+            logger.error(
+                f"Error rolling back file {original_source} from {rollback_source}: {e}"
+            )
+    return
+
+
+def auto_image_export(
+    conn: sqlite3.Connection, job_id: str, settings: ImageExportSettings
+) -> None:
+    """
+    Creates and starts Image export tasks, saves them to database and updates job status.
+
+    This function requires a Settings object of type core.config.ImageExportSettings.
+
+    Args:
+        conn (sqlite3.Connection): Database connection object.
+        job_id (str): ID of the job to process.
+        settings (ImageExportSettings): Settings for the image export process.
+    """
     logger.debug(f"Starting image export procedure")
     job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
 
@@ -738,11 +1053,11 @@ def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
         return
 
     # Run Monthly Export Process
-    monthly_collection_path = settings["monthly_collection_path"].as_posix()  # type: ignore
-    name_prefix = settings["monthly_image_prefix"]
-    aoi_path = settings["aoi_asset_path"].as_posix()
-    dem_path = settings["dem_asset_path"].as_posix()
-    months_list = settings.get("months_list", None)
+    monthly_collection_path = settings.monthly_collection_path.as_posix()  # type: ignore
+    name_prefix = settings.monthly_image_prefix
+    aoi_path = settings.aoi_asset_path.as_posix()
+    dem_path = settings.dem_asset_path.as_posix()
+    months_list = settings.months_list
 
     try:
         monthly_export_results = monthly_export.monthly_img_export_proc(
@@ -776,6 +1091,7 @@ def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
         stats_export_status = "PENDING"
         logger.info(f"Generated {len(export_tasks)} image export tasks")
 
+    logger.debug(f"Updating image export status to {image_export_status}")
     conn.execute(
         """UPDATE jobs SET 
             image_export_status = ?, 
@@ -791,6 +1107,7 @@ def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
 
     if export_tasks:
         inserted_tasks = 0
+        logger.debug(f"Saving {len(export_tasks)} export tasks into database.")
         for task in export_tasks:
             try:
                 add_exportTask_to_db(conn, job_id, task)
@@ -818,8 +1135,22 @@ def auto_image_export(conn: sqlite3.Connection, job_id: str, settings: dict):
 
 
 def auto_stats_export(
-    conn: sqlite3.Connection, job_id: str, settings: dict, storage_conn
-):
+    conn: sqlite3.Connection,
+    job_id: str,
+    settings: StatsExportSettings,
+    storage_conn: storage.Client,
+) -> None:
+    """Creates and starts Statistics export tasks, saves them to database and updates job status.
+
+    This function requires a Settings object of type core.config.StatsExportSettings.
+
+    Args:
+        conn (sqlite3.Connection): Database connection object.
+        job_id (str): ID of the job to export statistics for.
+        settings (StatsExportSettings): Settings for the export process.
+        storage_conn (storage.Client): Storage client for accessing Google Cloud Storage.
+    """
+
     logger.debug(f"Starting stats export procedure")
 
     now_iso = db.datetime_to_iso(db.utc_now())
@@ -839,20 +1170,19 @@ def auto_stats_export(
         or job["stats_export_status"] != "PENDING"
         or pending_job_images > 0
     ):
+        logger.debug("Skipping stats export - Job not in correct state")
         return
 
-    logger.debug(f"Starting stats exports for job: {job_id}")
-    print(f"Starting stats exports for job: {job_id}")
     try:
 
         # stats_export_tasks = _dummy_stats_exportTaskList(job_id)
         # stats_export_tasks = ExportTaskList([])
         stats_export_tasks = tbl_monthly_export.monthly_tbl_export_proc(
-            settings=settings,
+            settings=settings.model_dump(),
             storage_conn=storage_conn,
-            storage_bucket=settings["storage_bucket"],
+            storage_bucket=settings.storage_bucket,
             force_overwrite=True,
-            skip_manifest=settings["skip_manifest"],
+            skip_manifest=settings.skip_manifest,
         )
 
     except Exception as e:
@@ -875,12 +1205,17 @@ def auto_stats_export(
         stats_export_status = "RUNNING"
         logger.info(f"Generated {len(stats_export_tasks)} stats export tasks")
 
+    logger.debug(f"Updating stats export status to {stats_export_status}")
     conn.execute(
         "UPDATE jobs SET stats_export_status = ?, updated_at = ? WHERE id = ?",
         (stats_export_status, db.datetime_to_iso(db.utc_now()), job_id),
     )
 
     if stats_export_tasks:
+        #  ----- SAVE TASKS TO DB -----
+        logger.debug(
+            f"Saving {len(stats_export_tasks)} stats export tasks into database."
+        )
         inserted_tasks = 0
         for task in stats_export_tasks:
             try:
@@ -892,6 +1227,19 @@ def auto_stats_export(
         logger.info(
             f"Inserted {inserted_tasks} out of {len(stats_export_tasks)} stats tasks in database."
         )
+        # ----- SAVE FILE TRANSFER INFO FOR FUTURE ROLLBACK -----
+        try:
+            logger.debug("Recording file transfers for stats exports")
+            record_file_transfers(
+                conn=conn,
+                job_id=job_id,
+                export_tasks=stats_export_tasks,
+                base_export_path=settings.base_export_path,
+                storage_conn=storage_conn,
+                storage_bucket=settings.storage_bucket,  # type: ignore
+            )
+        except Exception as e:
+            logger.error(f"Error recording file transfers: {e}")
 
         if inserted_tasks < len(stats_export_tasks):
             error_msg = _join_error_msgs(
@@ -911,104 +1259,27 @@ def auto_stats_export(
 
 
 # TODO: Set counter for retries of Job Reporting
-def auto_job_report(conn, job_id, settings: Settings):
-    iso_now = db.datetime_to_iso(db.utc_now())
-    job = conn.execute("SELECT * FROM jobs WHERE id=? LIMIT 1", (job_id,)).fetchone()
-    logger.debug("Starting Report Generation...")
-    print("Starting Report Generation...")
+def auto_job_init(settings: Settings) -> str:
+    """Initialize a new job and creates Image Export Tasks if required.
 
-    # Report only if Job has finished and reporting is pending
-    # fmt: off
-    if (job["job_status"] not in ("COMPLETED", "FAILED") or 
-        job["report_status"] not in ("PENDING")):
-        return
-    # fmt: on
-    logger.debug(f"Generating report for job [{job_id}]")
-    print(f"Generating report for job [{job_id}]...")
+    This function requires a Settings object of type core.config.Settings.
 
-    # Create new report entry if one doesn't exist
-    report_record = conn.execute(
-        "SELECT * FROM reports WHERE job_id=? LIMIT 1", (job_id,)
-    ).fetchone()
+    Args:
+        settings (Settings): Application settings object.
 
-    if not report_record:
-
-        conn.execute(
-            "INSERT INTO reports (job_id, status, attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (job_id, "PENDING", 1, iso_now, iso_now),
-        )
-        report_record = conn.execute(
-            "SELECT * FROM reports WHERE job_id=? LIMIT 1", (job_id,)
-        ).fetchone()
-    else:
-        conn.execute(
-            "UPDATE reports SET attempts=attempts+1, updated_at=? WHERE id=?",
-            (iso_now, report_record["id"]),
-        )
-
-    try:
-        report_context = email.make_job_report_context(conn, job_id)
-        if settings.app.email.enable_email:
-            email_service = email.EmailService(
-                host=settings.app.email.host,  # type: ignore
-                port=settings.app.email.port,  # type: ignore
-                user=settings.app.email.user,  # type: ignore
-                password=settings.app.email.password.get_secret_value(),  # type: ignore
-            )
-            email.send_report_message(
-                email_service=email_service,
-                from_address=settings.app.email.from_address,  # type: ignore
-                to_address=settings.app.email.to_address,  # type: ignore
-                context=report_context,
-            )
-            logging.info(f"Report sent for job {job_id}")
-        else:
-            logging.info("Email reporting is disabled.")
-
-    except Exception as e:
-        error_msg = f"Error generating report for job {job_id}: {e}"
-        logger.error(error_msg)
-        conn.execute(
-            """UPDATE reports SET 
-            status='FAILED', last_error=?, updated_at=? 
-            WHERE id=?""",
-            (
-                error_msg,
-                iso_now,
-                report_record["id"],
-            ),
-        )
-        return
-
-    # No Errors, Update report status
-    conn.execute(
-        "UPDATE jobs SET report_status='COMPLETED', updated_at=? WHERE id=?",
-        (
-            iso_now,
-            job_id,
-        ),
-    )
-    conn.execute(
-        "UPDATE reports SET status='COMPLETED', updated_at=? WHERE id=?",
-        (
-            iso_now,
-            report_record["id"],
-        ),
-    )
-    return
-
-
-# TODO: instead of receiving settings, call it from within
-def auto_job_init(settings: Settings):
-    logger.debug("Starting New Job")
+    Returns:
+        str: The ID of the created job.
+    """
+    logger.debug("Starting a new Job")
     db_path = settings.app.automation.db.db_path
 
     # Create new Job
     try:
         with db.db(db_path) as conn:
             # Create a new job
-            job_id = create_job(conn)
+            job_id = create_job(conn, settings.app.automation.timezone)
             logger.info(f"Created new job with ID: {job_id}")
+            print(f"Created new job with ID: {job_id}")
     except Exception as e:
         error_msg = f"Error creating daily job: {e}"
         logger.error(error_msg)
@@ -1031,6 +1302,7 @@ def auto_job_init(settings: Settings):
                     job_status = 'FAILED',
                     image_export_status = 'FAILED',
                     stats_export_status = 'FAILED',
+                    website_update_status = 'FAILED',
                     error = ?,
                     updated_at = ? WHERE id = ?""",
                 (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
@@ -1040,24 +1312,43 @@ def auto_job_init(settings: Settings):
     with db.db(db_path) as conn:
         # Save MODIS status
         logger.debug("Saving MODIS status info")
-        _save_modis_status(conn, job_id)
+        try:
+            _save_modis_status(conn, job_id)
+        except Exception as e:
+            error_msg = f"Error saving MODIS status: {e}"
+            logger.error(error_msg)
+            conn.execute(
+                """UPDATE jobs SET
+                   error = ?,
+                   updated_at = ? WHERE id = ?""",
+                (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
+            )
 
         # Execute Image Export
-        img_settings = {**settings.app.image_export.model_dump()}
-        auto_image_export(conn, job_id, img_settings)
+        auto_image_export(conn, job_id, settings.app.image_export)
 
         # Quick polling of Task status (if any were created)
+        logger.debug("Polling any created tasks (20 seconds delay)")
         time.sleep(20)  # Give GEE time to react
-        due_tasks = lease_due_tasks(conn)
+        due_tasks = _lease_due_tasks(conn)
         for db_task in due_tasks:
             update_task_status(conn, db_task)
 
         return job_id
 
 
-# TODO: instead of receiving settings, call it from within
 # TODO: Include function to rollback stats file move
-def auto_job_orchestration(settings: Settings):
+def auto_job_orchestration(settings: Settings) -> None:
+    """
+    Orchestrates the lifecycle of Running jobs.
+
+    Updates export task statuses, updates job status, creates Stats Exports (if Required),
+    updates website (if required) and reports on job results.
+    This function requires a Settings object of type core.config.Settings.
+
+    Args:
+        settings (Settings): Application settings object.
+    """
     logger.debug("Starting Job Orchestration")
     # ------ Attempt Connections ------
     logger.debug("Initializing connection to GEE")
@@ -1087,22 +1378,22 @@ def auto_job_orchestration(settings: Settings):
 
     with db.db(settings.app.automation.db.db_path) as conn:
         logger.debug("Initiating Orchestration")
-        print("--- Initiating Orchestration ---")
         logger.debug("Updating Export Task Status...")
-        print("Updating Export Task Status...")
         # Update status of Pending Tasks
-        due_tasks = lease_due_tasks(conn)
+        due_tasks = _lease_due_tasks(conn)
+        logger.debug(f"Updating status for {len(due_tasks)} pending tasks")
+        print(f"Updating status for {len(due_tasks)} pending tasks")
         for db_task in due_tasks:
             update_task_status(conn, db_task)
 
         # Orchestrate pending job steps
         logger.debug("Updating Jobs")
-        print("Updating Jobs...")
         jobs = conn.execute(
             "SELECT * FROM jobs WHERE job_status IN ('RUNNING') or report_status IN ('PENDING')"
         ).fetchall()
+        logger.debug(f"Orchestrating {len(jobs)} pending jobs")
+        print(f"Orchestrating {len(jobs)} pending jobs")
         for job in jobs:
-            print("-----------------------------------------------------")
             logger.debug(f"Orchestrating job: {job['id']}")
             print(f"Orchestrating job: {job['id']}")
 
@@ -1113,29 +1404,71 @@ def auto_job_orchestration(settings: Settings):
             job = conn.execute(
                 "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
             ).fetchone()
+
             if job["job_status"] == "RUNNING":
                 if job["image_export_status"] in ("RUNNING"):
                     logger.debug("Image Exports are still running")
-                    print("Image Exports are still running")
                     continue
 
-                if job["stats_export_status"] in ("RUNNING"):
-                    logger.debug("Stats Exports are still running")
-                    print("Stats Exports are still running")
+                # Create Stat Export Tasks (if required)
+                match job["stats_export_status"]:
+                    case "PENDING":
+                        # Early kill, only accepting storage exports for now.
+                        if not storage_conn:
+                            logger.warning(
+                                "No storage connection available for stats export"
+                            )
+                            continue
+
+                        auto_stats_export(
+                            conn, job["id"], settings.app.stats_export, storage_conn
+                        )
+
+                        job = conn.execute(
+                            "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
+                        ).fetchone()
+
+                    case "RUNNING":
+                        logger.debug("Stats Exports are still running")
+                        continue
+
+            if job["job_status"] == "RUNNING" and job["stats_export_status"] in (
+                "COMPLETED",
+                "FAILED",
+            ):
+                # verify no running stats exports
+                running_stats_exports = conn.execute(
+                    """SELECT id 
+                        FROM exports 
+                        WHERE job_id=? AND type='table' AND state='RUNNING'""",
+                    (job["id"],),
+                ).fetchall()
+                if running_stats_exports:
+                    # Still running, continue to next Job status update
                     continue
+                elif storage_conn and settings.app.stats_export.storage_bucket:
+                    # Finished Stats. Check for file rollbacks and attempt Website Update
+                    # ----- STATS ROLLBACK -----
+                    rollback_file_transfers(
+                        conn=conn,
+                        job_id=job["id"],
+                        storage_conn=storage_conn,
+                        storage_bucket=settings.app.stats_export.storage_bucket,
+                    )
+                    update_job(conn, job["id"])
 
-            # Create Stat Export Tasks (if required)
-            stats_settings = {
-                **settings.app.stats_export.model_dump(),
-                "monthly_image_prefix": settings.app.image_export.monthly_image_prefix,
-                "yearly_image_prefix": settings.app.image_export.yearly_image_prefix,
-            }
-            auto_stats_export(conn, job["id"], stats_settings, storage_conn)
+                    # ----- WEBSITE UPDATE -----
+                    auto_website_update(conn, job["id"], settings)
+                    job = conn.execute(
+                        "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
+                    ).fetchone()
 
-            # Get updated job status
-            job = conn.execute(
-                "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
-            ).fetchone()
-
-            # Generate Report
-            auto_job_report(conn, job["id"], settings)
+            # ----- GENERATE REPORT -----
+            if job["job_status"] not in ("COMPLETED", "FAILED") or job[
+                "report_status"
+            ] not in ("PENDING"):
+                continue
+            else:
+                # Generate Report
+                auto_job_report(conn, job["id"], settings.app.email)
+    return

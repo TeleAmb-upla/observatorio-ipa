@@ -164,6 +164,16 @@
                     <td class="tbl-cell status-tbl-label">Start Time:</td>
                     <td class="tbl-cell status-tbl-data">{{ created_at }}</td>
                 </tr>
+                <tr>
+                    <td class="tbl-cell status-tbl-label">Website Update:</td>
+                    <td class="tbl-cell status-tbl-data">
+                        {%- if website_update.pull_request_id -%}
+                        <a href="{{ website_update.pull_request_url }}"> Pull Request ID: {{ website_update.pull_request_id }}</a>
+                        {%- else -%}
+                        No website update performed.
+                        {%- endif %}
+                    </td>
+                </tr>
                 {%- if error %}
                 <tr>
                     <td class="tbl-cell status-tbl-label">Errors:</td>

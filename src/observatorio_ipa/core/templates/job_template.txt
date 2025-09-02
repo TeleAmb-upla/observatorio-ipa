@@ -1,6 +1,12 @@
 Status: {{ job_status }}
 Job ID: {{ id }}
 Start Time: {{ created_at }}
+Website Update: {%- if website_update -%}
+  Pull Request ID: {{ website_update.pull_request_id }}
+  Pull Request URL: {{ website_update.pull_request_url }}
+{%- else -%}
+  No website update performed.
+{%- endif %}
 
 {%- if error %}
 Errors: 

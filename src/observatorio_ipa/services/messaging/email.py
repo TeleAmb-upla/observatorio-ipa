@@ -2,7 +2,6 @@ import smtplib
 import logging
 import re
 import arrow
-from datetime import datetime
 from email_validator import validate_email, EmailNotValidError
 
 from email.message import EmailMessage
@@ -263,19 +262,6 @@ def parse_emails(emails: str | list) -> list[str]:
 
 
 # Useful functions
-def _split_dict_by_key(d: dict, key: str, keep_keys: list | None = None) -> dict:
-    result = {}
-    for item in d:
-        k = item.get(key)
-        filtered_item = {
-            kk: vv for kk, vv in item.items() if (not keep_keys) or (kk in keep_keys)
-        }
-        if k not in result:
-            result[k] = []
-        result[k].append(filtered_item)
-    return result
-
-
 # def send_error_message(
 #     script_start_time: datetime,
 #     exception: Exception,
@@ -315,90 +301,6 @@ def _split_dict_by_key(d: dict, key: str, keep_keys: list | None = None) -> dict
 
 
 #     return None
-def make_job_report_context(conn, job_id) -> dict:
-    job = conn.execute("SELECT * FROM jobs WHERE id = ?;", (job_id,)).fetchone()
-    if job:
-        job_results = {**dict(job)}
-    else:
-        return {
-            "id": job_id,
-            "status": "UNKNOWN",
-            "error": "Could not get Job information from database",
-            "created_at": None,
-            "export_tasks": {},
-            "modis": {},
-        }
-
-    export_tasks = conn.execute(
-        "SELECT * FROM exports WHERE job_id=?", (job_id,)
-    ).fetchall()
-    if export_tasks:
-        job_results["export_tasks"] = [dict(task) for task in export_tasks]
-    else:
-        job_results["export_tasks"] = {}
-
-    modis = conn.execute("SELECT * FROM modis WHERE job_id=?", (job_id,)).fetchall()
-    if modis:
-        job_results["modis"] = [dict(item) for item in modis]
-    else:
-        job_results["modis"] = {}
-
-    # Convert string to list of errors split by '|'
-    if job_results.get("error"):
-        job_results["error"] = [
-            e.strip() for e in job_results["error"].split("|") if e.strip()
-        ]
-
-    # Convert timestamp to readable string
-    if job_results.get("created_at"):
-        job_results["created_at"] = datetime.fromisoformat(
-            job_results["created_at"]
-        ).strftime("%Y-%m-%d %H:%M:%S")
-
-    # Keep only relevant keys of each task
-    if all_tasks := job_results.get("export_tasks"):
-        filtered_tasks = []
-        for task in all_tasks:
-            filtered_task = {
-                k: v
-                for k, v in task.items()
-                if k in ["type", "name", "state", "error", "last_error", "path"]
-            }
-            filtered_tasks.append(filtered_task)
-        job_results["export_tasks"] = filtered_tasks
-
-    # Split tasks by type and path
-    job_results["export_tasks"] = _split_dict_by_key(
-        job_results.get("export_tasks", []), "type"
-    )
-    for type in job_results["export_tasks"].keys():
-        job_results["export_tasks"][type] = _split_dict_by_key(
-            job_results["export_tasks"][type],
-            "path",
-            keep_keys=["name", "state", "error", "last_error"],
-        )
-
-    # Split terra/aqua
-    if modis := job_results.get("modis"):
-        modis_split = _split_dict_by_key(
-            modis,
-            "name",
-            keep_keys=[
-                "collection",
-                "images",
-                "last_image",
-            ],
-        )
-        # if more than one entry per collection, keep only the first one
-        for key in modis_split.keys():
-            first_item = modis_split[key][0]
-            modis_split[key] = {**first_item}
-
-        job_results["modis"] = modis_split
-
-    return job_results
-
-
 # TODO: Consider raising error to retry email
 def send_report_message(
     email_service: EmailService,

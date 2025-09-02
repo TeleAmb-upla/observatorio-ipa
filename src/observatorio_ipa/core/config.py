@@ -261,8 +261,10 @@ class StatsExportSettings(BaseSettings):
         extra="ignore",
     )
     # ----- Input Assets ------
-    monthly_collection_path: Path
-    yearly_collection_path: Path
+    monthly_collection_path: Path | None
+    monthly_image_prefix: str | None
+    yearly_collection_path: Path | None
+    yearly_image_prefix: str | None
     basins_asset_path: Path
     macrozones_asset_path: Path
     basins_cd_property: str
@@ -349,6 +351,28 @@ class AutoOrchestrationSettings(BaseSettings):
     interval_minutes: int = 3  # Every 3 minutes
 
 
+class GithubSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+    repo_url: str
+    app_id: str
+    private_key_path: str
+
+
+class AutoWebsiteSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+    github: GithubSettings
+    # storage_bucket: str | None
+    gcs_base_assets_path: str | Path
+    local_repo_path: str | Path
+    repo_base_assets_path: str | Path
+    work_branch: str
+    main_branch: str
+
+
 class AutoRunSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
@@ -357,6 +381,7 @@ class AutoRunSettings(BaseSettings):
     db: AutoDBSettings
     daily_job: AutoDailyJobSettings
     orchestration_job: AutoOrchestrationSettings
+    website: AutoWebsiteSettings
 
 
 class AppSettings(BaseSettings):
@@ -390,6 +415,15 @@ class AppSettings(BaseSettings):
                     "monthly_collection_path"
                 ]
 
+            # Copy Monthly Image Prefix
+            if (
+                stats_export.get("monthly_image_prefix") is None
+                and image_export.get("monthly_image_prefix") is not None
+            ):
+                stats_export["monthly_image_prefix"] = image_export[
+                    "monthly_image_prefix"
+                ]
+
             # Copy Yearly Collection Path
             if (
                 stats_export.get("yearly_collection_path") is None
@@ -399,6 +433,16 @@ class AppSettings(BaseSettings):
                 stats_export["yearly_collection_path"] = image_export[
                     "yearly_collection_path"
                 ]
+
+            # Copy Yearly Image Prefix
+            if (
+                stats_export.get("yearly_image_prefix") is None
+                and image_export.get("yearly_image_prefix") is not None
+            ):
+                stats_export["yearly_image_prefix"] = image_export[
+                    "yearly_image_prefix"
+                ]
+
         return values
 
     google: GoogleSettings
