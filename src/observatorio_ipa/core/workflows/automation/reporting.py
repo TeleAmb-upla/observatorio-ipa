@@ -153,7 +153,7 @@ def auto_job_report(
     logger.debug("Starting Report Generation...")
     print("Starting Report Generation...")
 
-    iso_now = db.datetime_to_iso(db.utc_now())
+    iso_now = db.datetime_to_iso(db.tz_now())
     job = conn.execute("SELECT * FROM jobs WHERE id=? LIMIT 1", (job_id,)).fetchone()
 
     # Report only if Job has finished and reporting is pending

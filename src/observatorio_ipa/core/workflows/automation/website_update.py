@@ -422,7 +422,7 @@ def auto_website_update(
     ).fetchone()
 
     if not db_website:
-        iso_now = db.datetime_to_iso(db.utc_now())
+        iso_now = db.datetime_to_iso(db.tz_now())
         conn.execute(
             """
             INSERT INTO website_updates (job_id, status, created_at, updated_at)
@@ -455,7 +455,7 @@ def auto_website_update(
             """UPDATE website_updates 
             SET status = 'COMPLETED', updated_at = ? 
             WHERE job_id = ? """,
-            (db.datetime_to_iso(db.utc_now()), job_id),
+            (db.datetime_to_iso(db.tz_now()), job_id),
         )
         logger.info("No files to replace. Exiting.")
         print("No files to replace. Exiting.")
@@ -478,7 +478,7 @@ def auto_website_update(
             UPDATE website_updates
             SET attempts = attempts + 1, last_error = ?, 
             updated_at = ? WHERE job_id = ? """,
-            (str(e), db.datetime_to_iso(db.utc_now()), job_id),
+            (str(e), db.datetime_to_iso(db.tz_now()), job_id),
         )
         return
 
@@ -493,7 +493,7 @@ def auto_website_update(
         (
             str(pull_request.id) if pull_request else None,
             pull_request.html_url if pull_request else None,
-            db.datetime_to_iso(db.utc_now()),
+            db.datetime_to_iso(db.tz_now()),
             job_id,
         ),
     )

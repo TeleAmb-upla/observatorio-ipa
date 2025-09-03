@@ -15,8 +15,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     stats_export_status TEXT NOT NULL DEFAULT 'PENDING', -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
     website_update_status TEXT NOT NULL DEFAULT 'PENDING', -- NOT_REQUIRED, PENDING, RUNNING, COMPLETED, FAILED
     report_status TEXT NOT NULL DEFAULT 'PENDING', -- SKIP, PENDING, COMPLETED, FAILED,
-    email_to TEXT,
     error TEXT,
+    timezone TEXT NOT NULL DEFAULT 'UTC',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -39,7 +39,6 @@ CREATE TABLE IF NOT EXISTS exports (
     poll_interval_sec INTEGER NOT NULL DEFAULT 5,
     attempts INTEGER NOT NULL DEFAULT 0,
     deadline_at TEXT,
-    timezone TEXT NOT NULL DEFAULT 'UTC',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE

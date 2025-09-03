@@ -47,7 +47,7 @@ def main():
     # Parse CLI args
     cli_args = cli.parse_cli_args()
 
-    # Load settings
+    # -------- Loading Settings ----------
     toml_file = cli_args.get("toml_file", "")
     toml_file = toml_file.strip("'\"")  # clean quotes if any
     if not toml_file:
@@ -66,6 +66,14 @@ def main():
         runtime_settings.app.logging,
         parse_to_bool(os.getenv("IPA_CONTAINERIZED", "False")),
     )
+    # ---------- Setting TZ ----------
+    tz_str = runtime_settings.app.automation.timezone
+    if tz_str:
+        try:
+            _ = ZoneInfo(tz_str)
+            os.environ["TZ"] = tz_str
+        except Exception as e:
+            raise SystemExit(f"Config error: invalid timezone '{tz_str}': {e}")
 
     # ---------- Setting DB ----------
     db_path_ = runtime_settings.app.automation.db.db_path

@@ -1,11 +1,13 @@
-import sqlite3, uuid, datetime, random
+import sqlite3, uuid, datetime, random, os, pytz
 from contextlib import contextmanager
 from pathlib import Path
 
 
-def utc_now(tz=datetime.timezone.utc) -> datetime.datetime:
+def tz_now(tz: str | None = None) -> datetime.datetime:
     """Get the current UTC time as a string."""
-    return datetime.datetime.now(tz=tz)
+    if not tz:
+        tz = os.getenv("TZ", "UTC")
+    return datetime.datetime.now(tz=pytz.timezone(tz))
 
 
 def datetime_to_iso(dt: datetime.datetime) -> str:
@@ -70,7 +72,7 @@ def db(db: str | Path):
 
 def now_iso_plus(seconds: int) -> str:
     """Get the current time plus a number of seconds as an ISO 8601 formatted string."""
-    return datetime_to_iso(utc_now() + datetime.timedelta(seconds=seconds))
+    return datetime_to_iso(tz_now() + datetime.timedelta(seconds=seconds))
 
 
 def dt_iso_plus(dt: datetime.datetime, seconds: int) -> str:

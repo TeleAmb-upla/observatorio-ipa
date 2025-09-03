@@ -238,14 +238,20 @@ def compare_manifest_to_collection(
     )
 
     # Get list of images in the manifest
-    manifest = get_manifest(
-        manifest_src, manifest_path, manifest_name, storage_conn, storage_bucket
-    )
+    try:
+        manifest = get_manifest(
+            manifest_src, manifest_path, manifest_name, storage_conn, storage_bucket
+        )
+    except Exception as e:
+        logger.warning(f"Error reading manifest: {e}")
+        manifest = {}
+
     manifest_collection = Path(manifest.get("image_collection", ""))
     manifest_images = manifest.get("images", [])
 
     return (
-        collection_path == manifest_collection and collection_images == manifest_images
+        collection_path == manifest_collection
+        and collection_images.sort() == manifest_images.sort()
     )
 
 
@@ -461,7 +467,9 @@ def monthly_tbl_export_proc(
     # Compare List of monthly Images to Manifest
     if not skip_manifest:
         logger.debug("Checking manifest")
-        if not force_overwrite and not compare_manifest_to_collection(
+        if force_overwrite:
+            pass
+        elif compare_manifest_to_collection(
             manifest_src=settings["manifest_source"],
             manifest_path=settings["manifest_path"],
             manifest_name="monthly_manifest.json",
@@ -470,6 +478,8 @@ def monthly_tbl_export_proc(
             storage_conn=storage_conn,
             storage_bucket=storage_bucket,
         ):
+            pass
+        else:
             return ExportTaskList()
 
     ###########################################
@@ -683,7 +693,7 @@ def monthly_tbl_export_proc(
             table_prefix=tbl_names["sca_y_m_basin_tbl_prefix"],
         )
         sca_y_m_bna.calc_stats()
-        month_export_tasks.extend(sca_y_m_bna.make_exports())
+        monthly_export_tasks.extend(sca_y_m_bna.make_exports())
 
         sca_ym_bna = year_month.SCA_YM_BNA(
             **year_month_common_args,
@@ -771,13 +781,18 @@ def monthly_tbl_export_proc(
     ]
     names_tasks_started = [task.name for task in tasks_started]
 
-    manifest = get_manifest(
-        source=settings["manifest_source"],
-        manifest_path=settings["manifest_path"],
-        manifest_name="monthly_manifest.json",
-        conn=storage_conn,
-        storage_bucket=storage_bucket,
-    )
+    try:
+        manifest = get_manifest(
+            source=settings["manifest_source"],
+            manifest_path=settings["manifest_path"],
+            manifest_name="monthly_manifest.json",
+            conn=storage_conn,
+            storage_bucket=storage_bucket,
+        )
+    except Exception as e:
+        logger.warning(f"Error reading manifest: {e}")
+        logger.info("Creating new manifest")
+        manifest = {}
 
     previous_exports = manifest.get("meta", {}).get("stats_exports", [])
     # -- Remove new exports from old manifest

@@ -124,7 +124,7 @@ def add_exportTask_to_db(
 ) -> None:
     """Add an ExportTask to 'exports' database table."""
 
-    now_iso = db.datetime_to_iso(db.utc_now())
+    now_iso = db.datetime_to_iso(db.tz_now())
     db_task_state = _map_export_task_to_db_state(export_task)
 
     conn.execute(
@@ -165,12 +165,12 @@ def create_job(conn: sqlite3.Connection, timezone: str) -> str:
     if timezone not in pytz.all_timezones:
         raise ValueError(f"Invalid timezone: {timezone}")
 
-    now = db.utc_now()
+    now = db.tz_now()
     job_id = db.new_id()
 
     conn.execute(
         """INSERT INTO jobs (id, job_status, timezone, created_at, updated_at)
-        VALUES (?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?)""",
         (
             job_id,
             "RUNNING",
@@ -202,7 +202,7 @@ def _get_state_of_tasks(conn: sqlite3.Connection, job_id: str, type: str) -> lis
 
 def _save_modis_status(conn: sqlite3.Connection, job_id: str) -> None:
     """Saves the MODIS Terra and Aqua image collection status to 'modis' database table."""
-    now_iso = db.datetime_to_iso(db.utc_now())
+    now_iso = db.datetime_to_iso(db.tz_now())
     ee_terra_ic = ee.imagecollection.ImageCollection(DEFAULT_TERRA_COLLECTION)
     ee_aqua_ic = ee.imagecollection.ImageCollection(DEFAULT_AQUA_COLLECTION)
     terra_image_dates = gee_dates.get_collection_dates(ee_terra_ic)
@@ -246,7 +246,7 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
 
     # print(f"Updating status for job {job_id}")
 
-    now_iso = db.datetime_to_iso(db.utc_now())
+    now_iso = db.datetime_to_iso(db.tz_now())
     # Exit if job is not RUNNING - Assumes Nothing Needs Update
     job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if not job:
@@ -672,7 +672,7 @@ def _lease_due_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
     Sets a lease time for the tasks to prevent multiple workers from processing the same task simultaneously.
     """
-    now = db.utc_now()
+    now = db.tz_now()
     now_iso = db.datetime_to_iso(now)
     # original code pulled everything with state ('PENDING','RUNNING','SUCCEEDED','FAILED','TIMED_OUT')
     # Why is TIMED_OUT still being included?
@@ -688,6 +688,7 @@ def _lease_due_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
             )""",
         (db.now_iso_plus(LEASE_SECONDS), now_iso, now_iso),
     )
+    conn.commit()
 
     #! Review, this would pull all records with lease set before this run. Leases are 60 seconds and polls will be 120 so there shouldn't be any pending leases
     #! but, if multiple workers are running they might pull each other's leases
@@ -751,7 +752,7 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row) -> None:
         db_task (sqlite3.Row): Database row representing the task to update.
 
     """
-    now = db.utc_now()
+    now = db.tz_now()
     now_iso = db.datetime_to_iso(now)
     next_poll_interval = db.next_backoff(db_task["poll_interval_sec"])
     next_check_at = db.dt_iso_plus(now, next_poll_interval)
@@ -858,7 +859,7 @@ def record_file_transfers(
         files: list of file paths (str or Path)
         base_export_path: the base path in storage (str or Path)
     """
-    iso_now = db.datetime_to_iso(db.utc_now())
+    iso_now = db.datetime_to_iso(db.tz_now())
     base_export_path = Path(base_export_path)
     for task in export_tasks:
         file = Path(task.path, task.name)
@@ -1023,7 +1024,7 @@ def rollback_file_transfers(
                 UPDATE file_transfers 
                 SET status='ROLLED_BACK', updated_at=? WHERE id=?
                 """,
-                (db.datetime_to_iso(db.utc_now()), file["transfer_id"]),
+                (db.datetime_to_iso(db.tz_now()), file["transfer_id"]),
             )
         except Exception as e:
             logger.error(
@@ -1078,7 +1079,7 @@ def auto_image_export(
                 image_export_status = 'FAILED',
                 error = ?,
                 updated_at = ? WHERE id = ?""",
-            (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
+            (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
         )
         return
 
@@ -1100,7 +1101,7 @@ def auto_image_export(
         (
             image_export_status,
             stats_export_status,
-            db.datetime_to_iso(db.utc_now()),
+            db.datetime_to_iso(db.tz_now()),
             job_id,
         ),
     )
@@ -1127,7 +1128,7 @@ def auto_image_export(
                 """UPDATE jobs SET 
                     stats_export_status='FAILED',
                     error=?, updated_at=? WHERE id=?""",
-                (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
+                (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
             )
 
     # Update Job Status in DB
@@ -1153,7 +1154,7 @@ def auto_stats_export(
 
     logger.debug(f"Starting stats export procedure")
 
-    now_iso = db.datetime_to_iso(db.utc_now())
+    now_iso = db.datetime_to_iso(db.tz_now())
     job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     job_images = conn.execute(
         """SELECT count(*) as count 
@@ -1194,7 +1195,7 @@ def auto_stats_export(
                 stats_export_status = 'FAILED', 
                 error = ?,
                 updated_at = ? WHERE id = ?""",
-            (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
+            (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
         )
         return
 
@@ -1208,7 +1209,7 @@ def auto_stats_export(
     logger.debug(f"Updating stats export status to {stats_export_status}")
     conn.execute(
         "UPDATE jobs SET stats_export_status = ?, updated_at = ? WHERE id = ?",
-        (stats_export_status, db.datetime_to_iso(db.utc_now()), job_id),
+        (stats_export_status, db.datetime_to_iso(db.tz_now()), job_id),
     )
 
     if stats_export_tasks:
@@ -1305,7 +1306,7 @@ def auto_job_init(settings: Settings) -> str:
                     website_update_status = 'FAILED',
                     error = ?,
                     updated_at = ? WHERE id = ?""",
-                (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
+                (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
             )
         raise e
 
@@ -1321,7 +1322,7 @@ def auto_job_init(settings: Settings) -> str:
                 """UPDATE jobs SET
                    error = ?,
                    updated_at = ? WHERE id = ?""",
-                (error_msg, db.datetime_to_iso(db.utc_now()), job_id),
+                (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
             )
 
         # Execute Image Export
@@ -1385,6 +1386,7 @@ def auto_job_orchestration(settings: Settings) -> None:
         print(f"Updating status for {len(due_tasks)} pending tasks")
         for db_task in due_tasks:
             update_task_status(conn, db_task)
+            conn.commit()
 
         # Orchestrate pending job steps
         logger.debug("Updating Jobs")
@@ -1399,6 +1401,7 @@ def auto_job_orchestration(settings: Settings) -> None:
 
             # Update Job Status
             update_job(conn, job["id"])
+            conn.commit()
 
             # Get updated Job Status
             job = conn.execute(
@@ -1423,6 +1426,7 @@ def auto_job_orchestration(settings: Settings) -> None:
                         auto_stats_export(
                             conn, job["id"], settings.app.stats_export, storage_conn
                         )
+                        conn.commit()
 
                         job = conn.execute(
                             "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
@@ -1455,10 +1459,13 @@ def auto_job_orchestration(settings: Settings) -> None:
                         storage_conn=storage_conn,
                         storage_bucket=settings.app.stats_export.storage_bucket,
                     )
+                    conn.commit()
                     update_job(conn, job["id"])
+                    conn.commit()
 
                     # ----- WEBSITE UPDATE -----
                     auto_website_update(conn, job["id"], settings)
+                    conn.commit()
                     job = conn.execute(
                         "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
                     ).fetchone()
@@ -1471,4 +1478,5 @@ def auto_job_orchestration(settings: Settings) -> None:
             else:
                 # Generate Report
                 auto_job_report(conn, job["id"], settings.app.email)
+                conn.commit()
     return
