@@ -76,14 +76,14 @@ def tac_reclass_and_impute(
     # step 2: Impute TAC values from temporal time series
     ee_temporal_ic = temporal.ic_impute_tac_temporal(ee_merged_ic)
 
-    # step 3: Impute from spatial neighbors
-    ee_imputed_ic = spatial_4.ic_impute_TAC_spatial4(ee_temporal_ic)
+    # # step 3: Impute from spatial neighbors
+    ee_spatial4_ic = spatial_4.ic_impute_TAC_spatial4(ee_temporal_ic)
 
-    # step 4: Impute from spatial neighbors and DEM data
-    ee_imputed_ic = spatial_8.ic_impute_tac_spatial_dem(ee_imputed_ic, ee_dem_img)
+    # # step 4: Impute from spatial neighbors and DEM data
+    ee_spatial8_ic = spatial_8.ic_impute_tac_spatial_dem(ee_spatial4_ic, ee_dem_img)
 
     # step 5: Split cloud and snow bands
-    ee_cloud_snow_ic = ee_imputed_ic.map(_split_cloud_snow_bands).select(
+    ee_cloud_snow_ic = ee_spatial8_ic.map(_split_cloud_snow_bands).select(
         "Cloud_TAC", "Snow_TAC", "QA_CR"
     )
 

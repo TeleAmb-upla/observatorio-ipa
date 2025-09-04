@@ -11,7 +11,7 @@ import ee
 from observatorio_ipa.core.defaults import DEFAULT_CHI_PROJECTION, DEFAULT_SCALE
 
 
-def _ee_impute_tac_spatial4(image: ee.image.Image) -> ee.image.Image:
+def _ee_impute_tac_spatial4(ee_image: ee.image.Image) -> ee.image.Image:
     """
     Imputes missing TAC values using spatial neighboring pixels if 3 or more neighbors have the same value.
 
@@ -53,7 +53,9 @@ def _ee_impute_tac_spatial4(image: ee.image.Image) -> ee.image.Image:
     # 50 : Land --> 7
     # 100: Snow --> 9
 
-    ee_TAC_original_img = ee.image.Image(image.select("TAC").reproject(ee_projection))
+    ee_TAC_original_img = ee.image.Image(
+        ee_image.select("TAC").reproject(ee_projection)
+    )
     ee_TAC_reclassified_img = ee_TAC_original_img.remap(
         from_=[0, 50, 100],  # Original values of the TAC band
         to=[0, 7, 9],  # New reclassified values
@@ -80,7 +82,7 @@ def _ee_impute_tac_spatial4(image: ee.image.Image) -> ee.image.Image:
     ).rename("TAC_step_4")
 
     # Combine original and imputed TAC bands into one image
-    ee_TAC_new_img = (
+    ee_new_TAC_img = (
         ee.image.Image.cat([ee_TAC_original_img, ee_masked_reclass_img])
         .reduce(ee.reducer.Reducer.max())
         .rename("TAC")
@@ -88,7 +90,7 @@ def _ee_impute_tac_spatial4(image: ee.image.Image) -> ee.image.Image:
 
     # ----------UPDATE QA_CR FOR IMPUTED VALUES----------------
 
-    ee_QA_original_img = image.select("QA_CR")
+    ee_QA_original_img = ee_image.select("QA_CR")
 
     # Set QA for points with imputed TAC to 40 where new TAC are >0 to 40
     # Imputed TAC points are those where originally TAC==0 and now TAC>0
@@ -103,14 +105,14 @@ def _ee_impute_tac_spatial4(image: ee.image.Image) -> ee.image.Image:
     )
 
     return (
-        image.select([])
-        .addBands(ee_TAC_new_img)
+        ee_image.select([])
+        .addBands(ee_new_TAC_img)
         .addBands(ee_QA_new_img)
         .set("DEM_snow_max", None)
         .set("DEM_snow_min", None)
         .set(
             "system:time_start_date",
-            ee.ee_date.Date(image.get("system:time_start")).format("YYYY_MM_dd"),
+            ee.ee_date.Date(ee_image.get("system:time_start")).format("YYYY_MM_dd"),
         )
     )
 
