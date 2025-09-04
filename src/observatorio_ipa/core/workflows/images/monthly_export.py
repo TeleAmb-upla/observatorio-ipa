@@ -271,6 +271,8 @@ def monthly_img_export_proc(
     dem_path: str,
     name_prefix: str | None = None,
     months_list: list[str] | None = None,
+    min_month: str | None = None,
+    max_exports: int | None = None,
 ) -> dict:
     """Workflow to export monthly images with Cloud and Snow TAC bands.
 
@@ -333,6 +335,10 @@ def monthly_img_export_proc(
             start_date=date.fromisoformat(DEFAULT_START_DT), end_date=date.today()
         )
 
+    if min_month:
+        initial_export_plan = [
+            month for month in initial_export_plan if month >= min_month
+        ]
     # ***********************************
     # * EXCLUDE IMAGES ALREADY EXPORTED *
     # ***********************************
@@ -509,6 +515,10 @@ def monthly_img_export_proc(
     # monthly_img_dates = gee_dates.get_collection_dates(ee_monthly_tac_ic)
     monthly_img_dates = images_to_export
     monthly_img_dates.sort()
+
+    if max_exports is not None and len(monthly_img_dates) > max_exports:
+        monthly_img_dates = monthly_img_dates[:max_exports]
+        logger.info(f"Limiting number of exports to max_exports={max_exports}.")
 
     export_tasks = ExportTaskList()
     for month_ in monthly_img_dates:

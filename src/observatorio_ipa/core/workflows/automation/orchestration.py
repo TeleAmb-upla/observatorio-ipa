@@ -1055,20 +1055,21 @@ def auto_image_export(
 
     # Run Monthly Export Process
     monthly_collection_path = settings.monthly_collection_path.as_posix()  # type: ignore
-    name_prefix = settings.monthly_image_prefix
-    aoi_path = settings.aoi_asset_path.as_posix()
-    dem_path = settings.dem_asset_path.as_posix()
-    months_list = settings.months_list
 
     try:
-        monthly_export_results = monthly_export.monthly_img_export_proc(
-            monthly_collection_path=monthly_collection_path,
-            aoi_path=aoi_path,
-            dem_path=dem_path,
-            name_prefix=name_prefix,
-            months_list=months_list,
-        )
-        export_tasks = monthly_export_results["export_tasks"]
+        if settings.monthly_collection_path:
+            monthly_export_results = monthly_export.monthly_img_export_proc(
+                monthly_collection_path=settings.monthly_collection_path.as_posix(),
+                aoi_path=settings.aoi_asset_path.as_posix(),
+                dem_path=settings.dem_asset_path.as_posix(),
+                name_prefix=settings.monthly_image_prefix,
+                months_list=settings.months_list,
+                min_month=settings.min_month,
+                max_exports=settings.max_exports,
+            )
+            export_tasks = monthly_export_results["export_tasks"]
+        else:
+            export_tasks = ExportTaskList([])
 
     except Exception as e:
         # Mark Job as FAILED if monthly export doesn't complete

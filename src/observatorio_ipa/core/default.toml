@@ -32,15 +32,21 @@ date_format = "%Y-%m-%d %H:%M:%S"
 ###########################################################
 
 [app.image_export]
-monthly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly_Monthly"
-monthly_image_prefix = "Andes_MCDS4S5_Yearly_Monthly"
-yearly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly"
-yearly_image_prefix = "Andes_MCDS4S5_Yearly"
 aoi_asset_path = "projects/ee-observatorionieves/assets/Modules/Andes"
 dem_asset_path = "projects/ee-observatorionieves/assets/Modules/DEM_SRTM_reproj_MODIS_463_Andes"
+# daily_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Daily"
+# daily_image_prefix = "Andes_MCDS4S5_Daily"
 # days_list = []
+# min_day = "2020-01-01"
+monthly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly_Monthly"
+monthly_image_prefix = "Andes_MCDS4S5_Yearly_Monthly"
 # months_list = []
+# min_month = "2020-01"
+yearly_collection_path = "projects/ee-observatorionieves/assets/MODIS/Andes_MCDS4S5_Yearly"
+yearly_image_prefix = "Andes_MCDS4S5_Yearly"
 # years_list = []
+# min_year = "2020"
+# max_exports = None
 
 ###########################################################
 #                  STATS EXPORT                           #

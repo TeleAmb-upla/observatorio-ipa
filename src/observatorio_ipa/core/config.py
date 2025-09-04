@@ -167,20 +167,41 @@ class LogSettings(BaseSettings):
 
 
 class ImageExportSettings(BaseSettings):
-    # @model_validator(mode="after")
-    # def check_days_or_months(self):
-    #     days = getattr(self, "days_list", None)
-    #     months = getattr(self, "months_list", None)
-    #     # Add years_list if/when implemented
-    #     if (not days or len(days) == 0) and (not months or len(months) == 0):
-    #         raise ValueError(
-    #             "At least one of 'days_list' or 'months_list' must be provided and not empty in ImageExportSettings."
-    #         )
-    #     return self
+    @model_validator(mode="after")
+    def check_min_on_list(self):
+        if self.months_list and self.min_month:
+            if any(m < self.min_month for m in self.months_list):
+                raise ValueError(
+                    "All months in months_list must be greater than or equal to min_month."
+                )
+        if self.years_list and self.min_year:
+            if any(y < self.min_year for y in self.years_list):
+                raise ValueError(
+                    "All years in years_list must be greater than or equal to min_year."
+                )
+        if self.days_list and self.min_day:
+            if any(d < self.min_day for d in self.days_list):
+                raise ValueError(
+                    "All days in days_list must be greater than or equal to min_day."
+                )
+        return self
 
     model_config = SettingsConfigDict(
         extra="ignore",
     )
+
+    aoi_asset_path: Annotated[
+        Path,
+        Field(
+            description="Path to Feature Collection with Area of Interest (AOI)",
+        ),
+    ]
+    dem_asset_path: Annotated[
+        Path,
+        Field(
+            description="Path to Image with Digital Elevation Model (DEM)",
+        ),
+    ]
 
     # Image Collections (Used for both Input and Output)
     daily_collection_path: Annotated[
@@ -196,6 +217,14 @@ class ImageExportSettings(BaseSettings):
         ),
     ] = None
 
+    days_list: Annotated[
+        list[date] | None,
+        BeforeValidator(parse_str_list),
+        Field(description="Explicit list of days to export (format: ['YYYY-MM-DD'])"),
+    ] = None
+
+    min_day: date | None = None
+
     monthly_collection_path: Annotated[
         Path | None,
         Field(
@@ -208,6 +237,14 @@ class ImageExportSettings(BaseSettings):
             description="Prefix for monthly images. Final image name will be <prefix>_<date>"
         ),
     ] = None
+
+    months_list: Annotated[
+        list[YearMonthStr] | None,
+        BeforeValidator(parse_str_list),
+        Field(description="Explicit list of months to export (format: ['YYYY-MM'])"),
+    ] = None
+
+    min_month: YearMonthStr | None = None
 
     yearly_collection_path: Annotated[
         Path | None,
@@ -222,37 +259,16 @@ class ImageExportSettings(BaseSettings):
         ),
     ] = None
 
-    aoi_asset_path: Annotated[
-        Path,
-        Field(
-            description="Path to Feature Collection with Area of Interest (AOI)",
-        ),
-    ]
-    dem_asset_path: Annotated[
-        Path,
-        Field(
-            description="Path to Image with Digital Elevation Model (DEM)",
-        ),
-    ]
-
-    # Custom lists to export
-    days_list: Annotated[
-        list[date] | None,
-        BeforeValidator(parse_str_list),
-        Field(description="Explicit list of days to export (format: ['YYYY-MM-DD'])"),
-    ] = None
-
-    months_list: Annotated[
-        list[YearMonthStr] | None,
-        BeforeValidator(parse_str_list),
-        Field(description="Explicit list of months to export (format: ['YYYY-MM'])"),
-    ] = None
-
     years_list: Annotated[
         list[YearStr] | None,
         BeforeValidator(parse_str_list),
         Field(description="Explicit list of years to export (format: ['YYYY'])"),
     ] = None
+
+    min_year: YearStr | None = None
+
+    # Limits on exports
+    max_exports: int | None = None
 
 
 # TODO: Make month, monthly, yearly exports optional in case we want to rerun specific types only
