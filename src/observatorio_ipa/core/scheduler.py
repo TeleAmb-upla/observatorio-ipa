@@ -12,7 +12,7 @@ from observatorio_ipa.core.config import LOGGER_NAME, Settings
 from observatorio_ipa.core.scripting import parse_to_bool
 from observatorio_ipa.core.workflows.automation.orchestration import (
     auto_job_init,
-    auto_job_orchestration,
+    auto_orchestration,
 )
 from observatorio_ipa.utils.logs import init_logging_config
 
@@ -38,7 +38,7 @@ def _job_create(settings: Settings) -> None:
 
 def _job_poll(settings: Settings) -> None:
     logger.info("poll_and_orchestrate: start")
-    auto_job_orchestration(settings)
+    auto_orchestration(settings)
     logger.info("poll_and_orchestrate: end")
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 from google.oauth2 import service_account
 from google.cloud import storage
 import ee.batch
+from sqlalchemy import case
 from observatorio_ipa.core.workflows.automation.reporting import auto_job_report
 from observatorio_ipa.utils import db
 from observatorio_ipa.core.config import (
@@ -990,7 +991,8 @@ def rollback_file_transfers(
     db_rollback = conn.execute(
         """
         SELECT a.id as export_id, b.id as transfer_id, b.source_path, b.destination_path 
-        FROM exports a LEFT JOIN file_transfers b ON a.id = b.export_id
+        FROM exports a LEFT 
+        JOIN file_transfers b ON a.id = b.export_id
         WHERE a.job_id = ? 
             AND a.state = 'FAILED'
             AND b.status = 'MOVED'
@@ -1153,27 +1155,29 @@ def auto_stats_export(
         storage_conn (storage.Client): Storage client for accessing Google Cloud Storage.
     """
 
-    logger.debug(f"Starting stats export procedure")
-
     now_iso = db.datetime_to_iso(db.tz_now())
     job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    job_images = conn.execute(
-        """SELECT count(*) as count 
-            FROM exports 
-            WHERE job_id=? AND state='RUNNING'""",
-        (job_id,),
-    ).fetchone()
 
-    pending_job_images = job_images["count"] if job_images else 0
+    job_images = _get_state_of_tasks(conn, job_id, "image")
+    running_images = [s for s in job_images if s == "RUNNING"]
+    completed_images = [s for s in job_images if s == "COMPLETED"]
 
-    # Skip if job is not RUNNING or image exports are not COMPLETED or stats exports is not PENDING
-    if (
-        job["job_status"] != "RUNNING"
-        or job["stats_export_status"] != "PENDING"
-        or pending_job_images > 0
-    ):
+    # Skip if job is not RUNNING or stats exports is not PENDING
+    if job["job_status"] != "RUNNING" or job["stats_export_status"] != "PENDING":
         logger.debug("Skipping stats export - Job not in correct state")
         return
+
+    # skip if image exports are still running
+    elif running_images:
+        logger.debug("Skipping stats export - Image exports still running")
+        return
+
+    # skip if no images were exported or all failed
+    elif not completed_images:
+        logger.debug("Skipping stats export - No images exported or all failed")
+        return
+    else:
+        logger.debug(f"Starting stats export procedure")
 
     try:
 
@@ -1339,8 +1343,123 @@ def auto_job_init(settings: Settings) -> str:
         return job_id
 
 
-# TODO: Include function to rollback stats file move
-def auto_job_orchestration(settings: Settings) -> None:
+def auto_job_orchestration(
+    conn: sqlite3.Connection,
+    job_id: int,
+    settings: Settings,
+    storage_conn: storage.Client | None,
+) -> None:
+
+    logger.debug(f"Orchestrating job: {job_id}")
+    print(f"Orchestrating job: {job_id}")
+
+    job = conn.execute("SELECT * FROM jobs WHERE id=? LIMIT 1", (job_id,)).fetchone()
+
+    if not job:
+        logger.error(f"Job ID {job_id} not found in database")
+        print(f"Job ID {job_id} not found in database")
+        return
+
+    ########## Update Job Status ##########
+    update_job(conn, job["id"])
+    conn.commit()
+
+    # Get updated Job Status
+    job = conn.execute("SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)).fetchone()
+
+    ########## Attempt Stats Exports ##########
+    if job["job_status"] == "RUNNING":
+        if job["image_export_status"] in ("RUNNING"):
+            logger.debug("Image Exports are still running")
+            return
+
+        # Create Stat Export Tasks (if required)
+        match job["stats_export_status"]:
+            case "PENDING":
+
+                # Early kill, only accepting storage exports for now.
+                if not storage_conn:
+                    logger.warning("No storage connection available for stats export")
+                    return
+
+                auto_stats_export(
+                    conn, job["id"], settings.app.stats_export, storage_conn
+                )
+                conn.commit()
+
+                job = conn.execute(
+                    "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
+                ).fetchone()
+
+            case "RUNNING":
+                logger.debug("Stats Exports are still running")
+                return
+
+            case "COMPLETED" | "FAILED":
+                running_stats_exports = conn.execute(
+                    """SELECT id 
+                    FROM exports 
+                    WHERE job_id=? AND type='table' AND state='RUNNING'""",
+                    (job["id"],),
+                ).fetchall()
+
+                if running_stats_exports:
+                    logger.debug("Stats Exports are still running")
+                    return
+
+                else:
+                    # Finished Stats. Check for file rollbacks and attempt Website Update
+                    # ----- STATS ROLLBACK -----
+                    if storage_conn and settings.app.stats_export.storage_bucket:
+                        try:
+                            rollback_file_transfers(
+                                conn=conn,
+                                job_id=job["id"],
+                                storage_conn=storage_conn,
+                                storage_bucket=settings.app.stats_export.storage_bucket,
+                            )
+                            conn.commit()
+                            update_job(conn, job["id"])
+                            conn.commit()
+                            pass
+                        except Exception as e:
+                            logger.error(f"Error during stats rollback: {e}")
+                            return
+                    else:
+                        logger.warning(
+                            "No storage connection available for stats rollback"
+                        )
+                        return
+            case _:
+                return
+
+    ########## Website Update ##########
+    if job["job_status"] == "RUNNING" and job["stats_export_status"] in (
+        "COMPLETED",
+        "FAILED",
+    ):
+
+        auto_website_update(conn, job["id"], settings)
+        conn.commit()
+        job = conn.execute(
+            "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
+        ).fetchone()
+
+    ########## Generate Report ##########
+    if job["job_status"] not in ("COMPLETED", "FAILED") or job["report_status"] not in (
+        "PENDING"
+    ):
+        # Something is still pending
+        return
+    else:
+        # Generate Report
+        auto_job_report(conn, job["id"], settings.app.email)
+        conn.commit()
+
+    return
+
+
+def auto_orchestration(settings: Settings) -> None:
     """
     Orchestrates the lifecycle of Running jobs.
 
@@ -1353,9 +1472,10 @@ def auto_job_orchestration(settings: Settings) -> None:
     """
     logger.debug("Starting Job Orchestration")
     # ------ Attempt Connections ------
+
+    # Connect to GEE
     logger.debug("Initializing connection to GEE")
     try:
-        # Connect to GEE
         runtime_service_account = connections.GoogleServiceAccount(
             settings.app.google.credentials_file.as_posix(),
         )
@@ -1365,23 +1485,31 @@ def auto_job_orchestration(settings: Settings) -> None:
         error_msg = f"Error connecting to GEE: {e}"
         logger.error(error_msg)
 
-    # Connect to Cloud Storage
-    if settings.app.stats_export.export_target == "storage":
-        logger.debug("Initializing connection to Google Cloud Storage")
+    # Connect to Storage
+    storage_conn = None
+    logger.debug("Attempting connection to Google Cloud Storage")
+    try:
         google_credentials = service_account.Credentials.from_service_account_info(
             runtime_service_account.credentials
         )
-        storage_conn = tbl_monthly_export.create_storage_client(
-            project=runtime_service_account.project_id,
-            credentials=google_credentials,
+        storage_conn = storage.Client(
+            project=runtime_service_account.project_id, credentials=google_credentials
         )
-    else:
-        storage_conn = None
+        logger.debug("Connected to Google Cloud Storage")
+
+    except Exception as e:
+        error_msg = f"Error connecting to Google Cloud Storage: {e}"
+        logger.error(error_msg)
+        print(error_msg)
+        return
 
     with db.db(settings.app.automation.db.db_path) as conn:
         logger.debug("Initiating Orchestration")
+
+        #########################################
+        #      Update Export Task Status        #
+        #########################################
         logger.debug("Updating Export Task Status...")
-        # Update status of Pending Tasks
         due_tasks = _lease_due_tasks(conn)
         logger.debug(f"Updating status for {len(due_tasks)} pending tasks")
         print(f"Updating status for {len(due_tasks)} pending tasks")
@@ -1389,95 +1517,17 @@ def auto_job_orchestration(settings: Settings) -> None:
             update_task_status(conn, db_task)
             conn.commit()
 
-        # Orchestrate pending job steps
-        logger.debug("Updating Jobs")
+        #########################################
+        #     Orchestrate pending job steps     #
+        #########################################
+        logger.debug("Orchestrating pending Jobs")
         jobs = conn.execute(
-            "SELECT * FROM jobs WHERE job_status IN ('RUNNING') or report_status IN ('PENDING')"
+            "SELECT id FROM jobs WHERE job_status IN ('RUNNING') or report_status IN ('PENDING')"
         ).fetchall()
         logger.debug(f"Orchestrating {len(jobs)} pending jobs")
         print(f"Orchestrating {len(jobs)} pending jobs")
+
         for job in jobs:
-            logger.debug(f"Orchestrating job: {job['id']}")
-            print(f"Orchestrating job: {job['id']}")
+            auto_job_orchestration(conn, job["id"], settings, storage_conn)
 
-            # Update Job Status
-            update_job(conn, job["id"])
-            conn.commit()
-
-            # Get updated Job Status
-            job = conn.execute(
-                "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
-            ).fetchone()
-
-            if job["job_status"] == "RUNNING":
-                if job["image_export_status"] in ("RUNNING"):
-                    logger.debug("Image Exports are still running")
-                    continue
-
-                # Create Stat Export Tasks (if required)
-                match job["stats_export_status"]:
-                    case "PENDING":
-                        # Early kill, only accepting storage exports for now.
-                        if not storage_conn:
-                            logger.warning(
-                                "No storage connection available for stats export"
-                            )
-                            continue
-
-                        auto_stats_export(
-                            conn, job["id"], settings.app.stats_export, storage_conn
-                        )
-                        conn.commit()
-
-                        job = conn.execute(
-                            "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
-                        ).fetchone()
-
-                    case "RUNNING":
-                        logger.debug("Stats Exports are still running")
-                        continue
-
-            if job["job_status"] == "RUNNING" and job["stats_export_status"] in (
-                "COMPLETED",
-                "FAILED",
-            ):
-                # verify no running stats exports
-                running_stats_exports = conn.execute(
-                    """SELECT id 
-                        FROM exports 
-                        WHERE job_id=? AND type='table' AND state='RUNNING'""",
-                    (job["id"],),
-                ).fetchall()
-                if running_stats_exports:
-                    # Still running, continue to next Job status update
-                    continue
-                elif storage_conn and settings.app.stats_export.storage_bucket:
-                    # Finished Stats. Check for file rollbacks and attempt Website Update
-                    # ----- STATS ROLLBACK -----
-                    rollback_file_transfers(
-                        conn=conn,
-                        job_id=job["id"],
-                        storage_conn=storage_conn,
-                        storage_bucket=settings.app.stats_export.storage_bucket,
-                    )
-                    conn.commit()
-                    update_job(conn, job["id"])
-                    conn.commit()
-
-                    # ----- WEBSITE UPDATE -----
-                    auto_website_update(conn, job["id"], settings)
-                    conn.commit()
-                    job = conn.execute(
-                        "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
-                    ).fetchone()
-
-            # ----- GENERATE REPORT -----
-            if job["job_status"] not in ("COMPLETED", "FAILED") or job[
-                "report_status"
-            ] not in ("PENDING"):
-                continue
-            else:
-                # Generate Report
-                auto_job_report(conn, job["id"], settings.app.email)
-                conn.commit()
     return
