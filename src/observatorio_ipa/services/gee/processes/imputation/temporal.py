@@ -155,7 +155,7 @@ def ic_impute_tac_temporal(
     #####################################
 
     # Impute values
-    ee_imputed_11_ic = ee.imagecollection.ImageCollection.fromImages(
+    ee_imputed_11_ic = ee.imagecollection.ImageCollection(
         ee_collection.map(
             lambda ee_image: _ee_impute_tac_temporal(
                 ee_image=ee_image,
@@ -172,7 +172,7 @@ def ic_impute_tac_temporal(
     # #####################################
 
     # # Impute values
-    ee_imputed_21_ic = ee.imagecollection.ImageCollection.fromImages(
+    ee_imputed_21_ic = ee.imagecollection.ImageCollection(
         ee_imputed_11_ic.map(
             lambda ee_image: _ee_impute_tac_temporal(
                 ee_image=ee_image,
@@ -188,7 +188,7 @@ def ic_impute_tac_temporal(
     # #    Impute values from days -1/+2  #
     # #####################################
 
-    ee_imputed_12_ic = ee.imagecollection.ImageCollection.fromImages(
+    ee_imputed_12_ic = ee.imagecollection.ImageCollection(
         ee_imputed_21_ic.map(
             lambda ee_image: _ee_impute_tac_temporal(
                 ee_image=ee_image,
