@@ -348,6 +348,7 @@ def monthly_img_export_proc(
         monthly_collection_path=monthly_collection_path,
         name_prefix=name_prefix,
     )
+    images_pending_export.sort()
 
     #! WARNING: This might print a very long list
     logger.info(f"Images pending export: {images_pending_export}")
