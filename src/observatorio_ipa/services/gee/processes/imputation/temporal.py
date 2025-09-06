@@ -1,14 +1,14 @@
 import ee
 from observatorio_ipa.core.defaults import MILLISECONDS_IN_DAY
 
+TEMPORAL_11_QA_VALUE = 20
+TEMPORAL_21_QA_VALUE = 21
+TEMPORAL_12_QA_VALUE = 22
+
 
 def _ee_impute_tac_temporal(
     ee_image: ee.image.Image,
-    # ee_date: ee.ee_date.Date,
-    qa_value: int,
     ee_reference_ic: ee.imagecollection.ImageCollection,
-    trail_buffer: int = 1,
-    lead_buffer: int = 1,
 ):
     """
     (Server Side Function) Imputes missing TAC values from specific leading and trailing images in a timeseries.
@@ -40,12 +40,10 @@ def _ee_impute_tac_temporal(
     # ---- CALC REFERENCE DATES -----
     ee_target_dt = ee.ee_number.Number(ee_image.get("system:time_start"))
 
-    ee_trailing_dt = ee_target_dt.subtract(
-        ee.ee_number.Number(trail_buffer).multiply(MILLISECONDS_IN_DAY)
-    )
-    ee_leading_dt = ee_target_dt.add(
-        ee.ee_number.Number(lead_buffer).multiply(MILLISECONDS_IN_DAY)
-    )
+    ee_trailing_1_dt = ee_target_dt.subtract(1 * MILLISECONDS_IN_DAY)
+    ee_leading_1_dt = ee_target_dt.add(1 * MILLISECONDS_IN_DAY)
+    ee_trailing_2_dt = ee_target_dt.subtract(2 * MILLISECONDS_IN_DAY)
+    ee_leading_2_dt = ee_target_dt.add(2 * MILLISECONDS_IN_DAY)
 
     # ---- GET REFERENCE IMAGES -----
     ee_target_img = ee_image  # Changing var name just for clarity
@@ -53,80 +51,202 @@ def _ee_impute_tac_temporal(
     # Adding Fallback images in case the image date doesn't exist in the collection.
     ee_fallback_img = ee.image.Image.constant(0).rename("TAC").toByte()
 
-    # Get trailing image or fallback image if not found
-    ee_candidate_trailing_img = ee.image.Image(
-        ee_reference_ic.select(["TAC"]).filterDate(ee_trailing_dt).first()
+    ####### TRAILING IMAGES or FALLBACK #########
+    # Trailing 1 day
+    ee_candidate_trailing_1_img = ee.image.Image(
+        ee_reference_ic.select(["TAC"]).filterDate(ee_trailing_1_dt).first()
     )
 
-    ee_trailing_img = ee.image.Image(
+    ee_trailing_1_img = ee.image.Image(
         ee.imagecollection.ImageCollection(
             [
                 ee_fallback_img,
-                ee_candidate_trailing_img,
+                ee_candidate_trailing_1_img,
             ]
         )
         .mosaic()
-        .set("system:time_start", ee_trailing_dt)
+        .set("system:time_start", ee_trailing_1_dt)
     )
 
-    ee_trailing_img = ee_trailing_img.rename("trailing_TAC")
+    ee_trailing_1_img = ee_trailing_1_img.rename("trailing_TAC")
 
-    # Get leading image or fallback image if not found
-
-    ee_candidate_leading_img = ee.image.Image(
-        ee_reference_ic.select(["TAC"]).filterDate(ee_leading_dt).first()
+    # Trailing 2 days
+    ee_candidate_trailing_2_img = ee.image.Image(
+        ee_reference_ic.select(["TAC"]).filterDate(ee_trailing_2_dt).first()
     )
 
-    ee_leading_img = ee.image.Image(
+    ee_trailing_2_img = ee.image.Image(
         ee.imagecollection.ImageCollection(
             [
                 ee_fallback_img,
-                ee_candidate_leading_img,
+                ee_candidate_trailing_2_img,
             ]
         )
         .mosaic()
-        .set("system:time_start", ee_leading_dt)
+        .set("system:time_start", ee_trailing_2_dt)
     )
 
-    ee_leading_img = ee_leading_img.rename("leading_TAC")
+    ee_trailing_2_img = ee_trailing_2_img.rename("trailing_TAC")
 
-    # ----- CALC NEW TAC -----
+    ####### LEADING IMAGES or FALLBACK #########
+    # Leading 1 day
+
+    ee_candidate_leading_1_img = ee.image.Image(
+        ee_reference_ic.select(["TAC"]).filterDate(ee_leading_1_dt).first()
+    )
+
+    ee_leading_1_img = ee.image.Image(
+        ee.imagecollection.ImageCollection(
+            [
+                ee_fallback_img,
+                ee_candidate_leading_1_img,
+            ]
+        )
+        .mosaic()
+        .set("system:time_start", ee_leading_1_dt)
+    )
+    ee_leading_1_img = ee_leading_1_img.rename("leading_TAC")
+
+    # Leading 2 days
+    ee_candidate_leading_2_img = ee.image.Image(
+        ee_reference_ic.select(["TAC"]).filterDate(ee_leading_2_dt).first()
+    )
+    ee_leading_2_img = ee.image.Image(
+        ee.imagecollection.ImageCollection(
+            [
+                ee_fallback_img,
+                ee_candidate_leading_2_img,
+            ]
+        )
+        .mosaic()
+        .set("system:time_start", ee_leading_2_dt)
+    )
+    ee_leading_2_img = ee_leading_2_img.rename("leading_TAC")
+
+    ####### CALC TAC AND QA VALUES #########
+    # ----- CALC NEW TAC for -1/+1 days-----
     ee_original_tac_img = ee_target_img.select("TAC")
 
     # Keep TAC values from leading and Trailing images where original target Image had TAC==0 (missing)
-    ee_mask_t0 = ee_original_tac_img.eq(0)
-    ee_masked_trailing_img = ee_trailing_img.updateMask(ee_mask_t0)
-    ee_masked_leading_img = ee_leading_img.updateMask(ee_mask_t0)
+    ee_11_mask_t0 = ee_original_tac_img.eq(0)
+    ee_11_masked_trailing_1_img = ee_trailing_1_img.updateMask(ee_11_mask_t0)
+    ee_11_masked_leading_1_img = ee_leading_1_img.updateMask(ee_11_mask_t0)
 
     # Identify points from Trailing and leading images where TAC values are the same and TAC>0
-    ee_matching_tac_mask_img = ee_masked_trailing_img.eq(
-        ee_masked_leading_img
-    ).updateMask(ee_masked_trailing_img.gt(0))
+    ee_11_matching_tac_mask_img = ee_11_masked_trailing_1_img.eq(
+        ee_11_masked_leading_1_img
+    ).updateMask(ee_11_masked_trailing_1_img.gt(0))
 
-    ee_imputed_tac_img = ee_masked_trailing_img.updateMask(ee_matching_tac_mask_img)
+    ee_11_imputed_tac_img = ee_11_masked_trailing_1_img.updateMask(
+        ee_11_matching_tac_mask_img
+    )
 
-    ee_new_tac_img = (
-        ee.image.Image.cat([ee_original_tac_img, ee_imputed_tac_img])
+    ee_11_new_tac_img = (
+        ee.image.Image.cat([ee_original_tac_img, ee_11_imputed_tac_img])
         .reduce(ee.reducer.Reducer.max())
         .rename("New_TAC")
     )
 
-    # ------ CALC NEW QC -----
+    # ------ CALC NEW QC for -1/+1 days -----
     ee_original_QA_img = ee_target_img.select("QA_CR")
 
     # Update QA band with new value where TAC values were successfully imputed
-    ee_imputed_qa_img = ee.image.Image(qa_value).updateMask(ee_matching_tac_mask_img)
-    ee_new_qa_img = (
-        ee.image.Image.cat([ee_original_QA_img, ee_imputed_qa_img])
+    ee_11_imputed_qa_img = ee.image.Image(TEMPORAL_11_QA_VALUE).updateMask(
+        ee_11_matching_tac_mask_img
+    )
+    ee_new_11_qa_img = (
+        ee.image.Image.cat([ee_original_QA_img, ee_11_imputed_qa_img])
         .reduce(ee.reducer.Reducer.max())
         .rename("New_QA_CR")
     )
 
-    return (
-        ee_target_img.addBands(ee_new_tac_img)
-        .addBands(ee_new_qa_img)
+    ee_11_new_img = (
+        ee_target_img.addBands(ee_11_new_tac_img)
+        .addBands(ee_new_11_qa_img)
         .select(["New_TAC", "New_QA_CR"], ["TAC", "QA_CR"])
     )
+
+    # ----- CALC NEW TAC for -2/+1 days-----
+    # Keep TAC values from leading and Trailing images where new imputed image has TAC==0 (missing)
+    ee_21_mask_t0 = ee_11_new_img.select("TAC").eq(
+        0
+    )  # start with the new TAC image from -1/+1 imputation
+    ee_21_masked_trailing_2_img = ee_trailing_2_img.updateMask(ee_21_mask_t0)
+    ee_21_masked_leading_1_img = ee_leading_1_img.updateMask(ee_21_mask_t0)
+
+    # Identify points from Trailing and leading images where TAC values are the same and TAC>0
+    ee_21_matching_tac_mask_img = ee_21_masked_trailing_2_img.eq(
+        ee_21_masked_leading_1_img
+    ).updateMask(ee_21_masked_trailing_2_img.gt(0))
+
+    ee_21_imputed_tac_img = ee_21_masked_trailing_2_img.updateMask(
+        ee_21_matching_tac_mask_img
+    )
+
+    ee_21_new_tac_img = (
+        ee.image.Image.cat([ee_11_new_img.select("TAC"), ee_21_imputed_tac_img])
+        .reduce(ee.reducer.Reducer.max())
+        .rename("New_TAC")
+    )
+
+    # ------ CALC NEW QC for -2/+1 days -----
+    # Update QA band with new value where TAC values were successfully imputed
+    ee_21_imputed_qa_img = ee.image.Image(TEMPORAL_21_QA_VALUE).updateMask(
+        ee_21_matching_tac_mask_img
+    )
+    ee_21_new_qa_img = (
+        ee.image.Image.cat([ee_11_new_img.select("QA_CR"), ee_21_imputed_qa_img])
+        .reduce(ee.reducer.Reducer.max())
+        .rename("New_QA_CR")
+    )
+
+    ee_new_21_img = (
+        ee_11_new_img.addBands(ee_21_new_tac_img)
+        .addBands(ee_21_new_qa_img)
+        .select(["New_TAC", "New_QA_CR"], ["TAC", "QA_CR"])
+    )
+
+    # ----- CALC NEW TAC for -1/+2 days-----
+    # Keep TAC values from leading and Trailing images where new imputed image has TAC==0 (missing)
+    ee_12_mask_t0 = ee_new_21_img.select("TAC").eq(
+        0
+    )  # start with the new TAC image from -2/+1 imputation
+    ee_12_masked_trailing_1_img = ee_trailing_1_img.updateMask(ee_12_mask_t0)
+    ee_12_masked_leading_2_img = ee_leading_2_img.updateMask(ee_12_mask_t0)
+
+    # Identify points from Trailing and leading images where TAC values are the same and TAC>0
+    ee_12_matching_tac_mask_img = ee_12_masked_trailing_1_img.eq(
+        ee_12_masked_leading_2_img
+    ).updateMask(ee_12_masked_trailing_1_img.gt(0))
+
+    ee_12_imputed_tac_img = ee_12_masked_trailing_1_img.updateMask(
+        ee_12_matching_tac_mask_img
+    )
+
+    ee_12_new_tac_img = (
+        ee.image.Image.cat([ee_new_21_img.select("TAC"), ee_12_imputed_tac_img])
+        .reduce(ee.reducer.Reducer.max())
+        .rename("New_TAC")
+    )
+
+    # ------ CALC NEW QC for -2/+1 days -----
+    # Update QA band with new value where TAC values were successfully imputed
+    ee_12_imputed_qa_img = ee.image.Image(TEMPORAL_12_QA_VALUE).updateMask(
+        ee_12_matching_tac_mask_img
+    )
+    ee_12_new_qa_img = (
+        ee.image.Image.cat([ee_new_21_img.select("QA_CR"), ee_12_imputed_qa_img])
+        .reduce(ee.reducer.Reducer.max())
+        .rename("New_QA_CR")
+    )
+
+    ee_12_new_img = (
+        ee_new_21_img.addBands(ee_12_new_tac_img)
+        .addBands(ee_12_new_qa_img)
+        .select(["New_TAC", "New_QA_CR"], ["TAC", "QA_CR"])
+    )
+
+    return ee_12_new_img
 
 
 def ic_impute_tac_temporal(
@@ -147,57 +267,14 @@ def ic_impute_tac_temporal(
 
     returns:
     """
-    # - Original code kept all images except buffers but was processing full range (2013-Current year)
-    # - Current code should keep all images, unnecessary buffers will be filtered when calculating monthly or yearly means
 
-    #####################################
-    #    Impute values from days -1/+1  #
-    #####################################
-
-    # Impute values
-    ee_imputed_11_ic = ee.imagecollection.ImageCollection(
+    ee_temporal_imputed_ic = ee.imagecollection.ImageCollection(
         ee_collection.map(
             lambda ee_image: _ee_impute_tac_temporal(
                 ee_image=ee_image,
                 ee_reference_ic=ee_collection,
-                qa_value=20,
-                trail_buffer=1,
-                lead_buffer=1,
             )
         )
     )
 
-    # #####################################
-    # #    Impute values from days -2/+1  #
-    # #####################################
-
-    # # Impute values
-    ee_imputed_21_ic = ee.imagecollection.ImageCollection(
-        ee_imputed_11_ic.map(
-            lambda ee_image: _ee_impute_tac_temporal(
-                ee_image=ee_image,
-                ee_reference_ic=ee_collection,
-                qa_value=21,
-                trail_buffer=2,
-                lead_buffer=1,
-            )
-        )
-    )
-
-    # #####################################
-    # #    Impute values from days -1/+2  #
-    # #####################################
-
-    ee_imputed_12_ic = ee.imagecollection.ImageCollection(
-        ee_imputed_21_ic.map(
-            lambda ee_image: _ee_impute_tac_temporal(
-                ee_image=ee_image,
-                ee_reference_ic=ee_collection,
-                qa_value=22,
-                trail_buffer=1,
-                lead_buffer=2,
-            )
-        )
-    )
-
-    return ee_imputed_12_ic
+    return ee_temporal_imputed_ic
