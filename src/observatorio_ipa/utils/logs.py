@@ -68,9 +68,6 @@ def init_logging_config(
     This function sets up the logging configuration based on the default settings.
     It configures the logging format, date format, and log file location.
     """
-
-    from observatorio_ipa.core.config import LOGGER_NAME
-
     new_logger = logging.getLogger(LOGGER_NAME)
     new_logger.setLevel(config.level)
 

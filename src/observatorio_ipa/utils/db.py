@@ -4,7 +4,10 @@ from pathlib import Path
 
 
 def tz_now(tz: str | None = None) -> datetime.datetime:
-    """Get the current UTC time as a string."""
+    """Get the current datetime. If no timezone is provided, use UTC.
+
+    Timezone can be provided by argument tz or by the 'TZ' environment variable.
+    """
     if not tz:
         tz = os.getenv("TZ", "UTC")
     return datetime.datetime.now(tz=pytz.timezone(tz))
