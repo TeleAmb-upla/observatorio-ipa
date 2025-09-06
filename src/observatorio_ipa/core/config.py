@@ -25,6 +25,8 @@ DEFAULT_ENV_FILE = ".env"
 LOGGER_NAME = "osn-ipa"
 TXT_REPORT_TEMPLATE = "job_template.txt"
 HTML_REPORT_TEMPLATE = "job_template.html"
+HEALTHCHECK_HEARTBEAT_FILE = "/var/lib/observatorio_ipa/healthcheck_heartbeat.txt"
+HEALTHCHECK_PORT = 8080
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -389,6 +391,13 @@ class AutoWebsiteSettings(BaseSettings):
     main_branch: str
 
 
+class HeartbeatSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+    heartbeat_file: Path = Path(HEALTHCHECK_HEARTBEAT_FILE)
+
+
 class AutoRunSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
@@ -398,6 +407,7 @@ class AutoRunSettings(BaseSettings):
     daily_job: AutoDailyJobSettings
     orchestration_job: AutoOrchestrationSettings
     website: AutoWebsiteSettings
+    heartbeat: HeartbeatSettings
 
 
 class AppSettings(BaseSettings):

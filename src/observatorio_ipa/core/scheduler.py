@@ -7,16 +7,26 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
+from observatorio_ipa.core.healthcheck import start_healthcheck_server
 from observatorio_ipa.core import config, cli, setup_db
-from observatorio_ipa.core.config import LOGGER_NAME, Settings
+from observatorio_ipa.core.config import LOGGER_NAME, HEALTHCHECK_PORT, Settings
 from observatorio_ipa.core.scripting import parse_to_bool
 from observatorio_ipa.core.workflows.automation.orchestration import (
     auto_job_init,
     auto_orchestration,
 )
 from observatorio_ipa.utils.logs import init_logging_config
+from observatorio_ipa.utils import db
 
 logger = logging.getLogger(LOGGER_NAME)
+
+
+def write_poll_heartbeat(
+    heartbeat_file: str | Path, timezone: str | None = None
+) -> None:
+    heartbeat_file = Path(heartbeat_file)
+    heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_file.write_text(db.datetime_to_iso(db.tz_now(timezone)), encoding="utf-8")
 
 
 def parse_cron_expr(expr: str) -> CronTrigger:
@@ -39,6 +49,10 @@ def _job_create(settings: Settings) -> None:
 def _job_poll(settings: Settings) -> None:
     logger.info("poll_and_orchestrate: start")
     auto_orchestration(settings)
+    write_poll_heartbeat(
+        heartbeat_file=settings.app.automation.heartbeat.heartbeat_file,
+        timezone=settings.app.automation.timezone,
+    )
     logger.info("poll_and_orchestrate: end")
 
 
@@ -66,6 +80,18 @@ def main():
         runtime_settings.app.logging,
         parse_to_bool(os.getenv("IPA_CONTAINERIZED", "False")),
     )
+
+    # ---------Start healthcheck server ---------
+    health_server = None
+    if parse_to_bool(os.getenv("IPA_CONTAINERIZED", "False")):
+        try:
+            health_server = start_healthcheck_server(
+                runtime_settings.app.automation, port=HEALTHCHECK_PORT
+            )
+            logger.info(f"Healthcheck server started on port {HEALTHCHECK_PORT}")
+        except Exception as e:
+            logger.error(f"Failed to start healthcheck server: {e}")
+
     # ---------- Setting TZ ----------
     tz_str = runtime_settings.app.automation.timezone
     if tz_str:
@@ -135,6 +161,9 @@ def main():
     def shutdown(signum, frame):
         logger.info(f"Signal {signum} received, shutting down scheduler…")
         sched.shutdown(wait=False)
+        if health_server:
+            logger.info("Shutting down healthcheck server…")
+            health_server.shutdown()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, shutdown)
@@ -145,4 +174,6 @@ def main():
 
 
 if __name__ == "__main__":
+    # Start healthcheck server before main scheduler
+    # start_healthcheck_server(port=int(os.getenv("HEALTHCHECK_PORT", "8080")))
     main()
