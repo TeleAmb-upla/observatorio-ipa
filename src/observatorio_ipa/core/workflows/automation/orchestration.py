@@ -1,4 +1,4 @@
-import sqlite3, logging, random, time, re, pytz
+import sqlite3, logging, random, time, re, pytz, os
 from datetime import datetime, date
 from pathlib import Path
 from google.oauth2 import service_account
@@ -1279,6 +1279,10 @@ def auto_job_init(settings: Settings) -> str:
     logger.debug("Starting a new Job")
     db_path = settings.app.automation.db.db_path
 
+    # ----- Setting TZ from settings -----
+    if tz := settings.app.automation.timezone:
+        os.environ["TZ"] = tz
+
     # Create new Job
     try:
         with db.db(db_path) as conn:
@@ -1441,6 +1445,8 @@ def auto_job_orchestration(
 
         auto_website_update(conn, job["id"], settings)
         conn.commit()
+        update_job(conn, job["id"])
+        conn.commit()
         job = conn.execute(
             "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
         ).fetchone()
@@ -1454,6 +1460,8 @@ def auto_job_orchestration(
     else:
         # Generate Report
         auto_job_report(conn, job["id"], settings.app.email)
+        conn.commit()
+        update_job(conn, job["id"])
         conn.commit()
 
     return
@@ -1470,7 +1478,12 @@ def auto_orchestration(settings: Settings) -> None:
     Args:
         settings (Settings): Application settings object.
     """
+
     logger.debug("Starting Job Orchestration")
+    # ----- Setting TZ from settings -----
+    if tz := settings.app.automation.timezone:
+        os.environ["TZ"] = tz
+
     # ------ Attempt Connections ------
 
     # Connect to GEE
@@ -1511,8 +1524,8 @@ def auto_orchestration(settings: Settings) -> None:
         #########################################
         logger.debug("Updating Export Task Status...")
         due_tasks = _lease_due_tasks(conn)
-        logger.debug(f"Updating status for {len(due_tasks)} pending tasks")
-        print(f"Updating status for {len(due_tasks)} pending tasks")
+        logger.info(f"Updating status for {len(due_tasks)} leased tasks")
+        print(f"Updating status for {len(due_tasks)} leased tasks")
         for db_task in due_tasks:
             update_task_status(conn, db_task)
             conn.commit()
@@ -1524,7 +1537,7 @@ def auto_orchestration(settings: Settings) -> None:
         jobs = conn.execute(
             "SELECT id FROM jobs WHERE job_status IN ('RUNNING') or report_status IN ('PENDING')"
         ).fetchall()
-        logger.debug(f"Orchestrating {len(jobs)} pending jobs")
+        logger.info(f"Orchestrating {len(jobs)} pending jobs")
         print(f"Orchestrating {len(jobs)} pending jobs")
 
         for job in jobs:
