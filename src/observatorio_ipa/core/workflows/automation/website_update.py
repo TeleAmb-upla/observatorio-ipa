@@ -15,6 +15,12 @@ from observatorio_ipa.core.config import Settings, AutoWebsiteSettings, LOGGER_N
 logger = logging.getLogger(LOGGER_NAME)
 
 
+class PullRequestAlreadyExistsError(Exception):
+    """Raised when a pull request already exists for the branch."""
+
+    pass
+
+
 def get_jwt(app_id: str, private_key_path: str) -> str:
     """
     Generate a JWT for GitHub App authentication.
@@ -239,15 +245,46 @@ def _commit_and_push(
         Job ID: {job_id}"""
     if repo.is_dirty():
         commit = repo.index.commit(commit_msg)
-        print("Committed changes.")
+        logger.debug("Committed changes.")
         url_with_token = _make_url_with_token(repo_url, github_token)
         repo.git.push(url_with_token, branch)
-        print(f"Pushed changes to branch {branch}.")
+        logger.info(f"Pushed changes to branch {branch}.")
         # Return the commit id
         return commit.hexsha
     else:
-        print("No changes to commit.")
+        logger.info("No changes to commit.")
         return None
+
+
+def _check_for_existing_pr(
+    repo_url: str, github_token: str, branch: str, base_branch: str = "main"
+) -> bool:
+    """
+    Check if a pull request already exists for the given branch.
+
+    Args:
+        repo (Repo): GitPython Repo object.
+        branch (str): Branch to check for PRs.
+        base_branch (str): Base branch for the PR (default: "main").
+
+    Returns:
+        PullRequest.PullRequest | None: The existing pull request or None.
+    """
+    repo_full_name = repo_url.rstrip(".git").split("github.com/")[-1]
+    github_repo = Github(github_token)
+    repo_obj = github_repo.get_repo(repo_full_name)
+    existing_prs = repo_obj.get_pulls(
+        state="open",
+        head=f"{repo_obj.owner.login}:{branch}",
+        base=base_branch,
+    )
+    if existing_prs.totalCount > 0:
+        logger.info(
+            "A pull request already exists for this branch. Waiting for it to clear."
+        )
+        print("A pull request already exists for this branch. Waiting for it to clear.")
+        return True
+    return False
 
 
 def _create_pull_request(
@@ -270,6 +307,9 @@ def _create_pull_request(
     Returns:
         PullRequest.PullRequest: The created pull request object.
 
+    Raises:
+        PullRequestAlreadyExistsError: If a pull request already exists for the branch.
+
     """
 
     repo_full_name = repo_url.rstrip(".git").split("github.com/")[-1]
@@ -279,11 +319,13 @@ def _create_pull_request(
     body = f"Automated update (replacement) of stats files from GCS. Job ID: {job_id}"
     try:
         pr = repo.create_pull(title=title, body=body, head=branch, base=base_branch)
-        print(f"Pull request created: {pr.html_url}")
+        logger.info(f"Pull request created: {pr.html_url}")
         return pr
     except Exception as e:
         if "A pull request already exists" in str(e):
-            print("A pull request already exists.")
+            error_msg = f"A pull request already exists for branch {branch}."
+            logger.warning(error_msg)
+            raise PullRequestAlreadyExistsError(error_msg)
         else:
             print(f"Failed to create pull request: {e}")
         raise e
@@ -309,7 +351,10 @@ def website_update(
         job_id (str): ID of the job triggering the update.
 
     Returns:
-        PullRequest.PullRequest | None: The created pull request or None if no changes were made.
+        PullRequest.PullRequest | None: The created pull request or None if no changes to commit.
+
+    Raises:
+        PullRequestAlreadyExistsError: If a pull request already exists for the branch.
 
     """
     # Create connection to GitHub
@@ -320,6 +365,17 @@ def website_update(
         private_key_path=github_settings.private_key_path,
         repo_url=github_settings.repo_url,
     )
+
+    # Check if a pull request already exists for this branch to main
+    if _check_for_existing_pr(
+        repo_url=github_settings.repo_url,
+        github_token=github_token,
+        branch=website_settings.work_branch,
+        base_branch=website_settings.main_branch,
+    ):
+        raise PullRequestAlreadyExistsError(
+            f"A pull request already exists for branch {website_settings.work_branch}. Waiting for it to clear."
+        )
 
     logger.debug("Starting GCS to GitHub file replacement process")
     # Clone or use Git Repo
@@ -364,8 +420,6 @@ def website_update(
         branch=website_settings.work_branch,
         base_branch=website_settings.main_branch,
     )
-    logger.info(f"Pull request created: {pr.html_url}")
-    print(f"Pull request created: {pr.html_url}")
     return pr
 
 
@@ -469,6 +523,9 @@ def auto_website_update(
             google_credentials_file=settings.app.google.credentials_file,
             job_id=job_id,
         )
+    except PullRequestAlreadyExistsError:
+        # Do Nothing if a PR already exists - Wait for it to clear
+        return
 
     except Exception as e:
         logger.error(f"Website update process Failed: {e}")
