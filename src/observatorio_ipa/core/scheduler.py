@@ -25,8 +25,12 @@ def write_poll_heartbeat(
     heartbeat_file: str | Path, timezone: str | None = None
 ) -> None:
     heartbeat_file = Path(heartbeat_file)
+    heartbeat = db.datetime_to_iso(db.tz_now(timezone))
+    logger.debug(f"Writing poll heartbeat to {heartbeat_file}")
+    logger.debug(f"Heartbeat content: {heartbeat}")
+
     heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
-    heartbeat_file.write_text(db.datetime_to_iso(db.tz_now(timezone)), encoding="utf-8")
+    heartbeat_file.write_text(heartbeat, encoding="utf-8")
 
 
 def parse_cron_expr(expr: str) -> CronTrigger:

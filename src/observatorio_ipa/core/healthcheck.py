@@ -28,8 +28,8 @@ class HealthHandler(BaseHTTPRequestHandler):
         # settings must be set before server starts
         cls.settings = copy.deepcopy(settings)
         # create a heartbeat_file if it doesn't exist
-        if HEALTHCHECK_HEARTBEAT_FILE:
-            hb_file = Path(HEALTHCHECK_HEARTBEAT_FILE)
+        if settings.heartbeat.heartbeat_file:
+            hb_file = Path(settings.heartbeat.heartbeat_file)
             if not hb_file.exists():
                 hb_file.parent.mkdir(parents=True, exist_ok=True)
                 tz = settings.timezone or "UTC"
@@ -64,36 +64,42 @@ class HealthHandler(BaseHTTPRequestHandler):
             result["checks"]["db"] = False
             result["healthy"] = False
             result["db_error"] = str(e)
+            logger.error(f"Healthcheck failed. DB connectivity issue: {str(e)}")
 
         # Export task staleness
-        try:
-            with db.db(db_path) as conn:
-                row = conn.execute(
-                    """
-                    SELECT MIN(next_check_at) AS min_next
-                    FROM exports
-                    WHERE state IN ('RUNNING')
-                """
-                ).fetchone()
-                staleness = 0
-                if row and row["min_next"]:
-                    min_next = datetime.fromisoformat(row["min_next"])
-                    staleness = max(0, int((now - min_next).total_seconds()))
+        # Disabled for now. Creating error when poll has been offline for valid reasons.
+        # try:
+        #     with db.db(db_path) as conn:
+        #         row = conn.execute(
+        #             """
+        #             SELECT MIN(next_check_at) AS min_next
+        #             FROM exports
+        #             WHERE state IN ('RUNNING')
+        #         """
+        #         ).fetchone()
+        #         staleness = 0
+        #         if row and row["min_next"]:
+        #             min_next = datetime.fromisoformat(row["min_next"])
+        #             staleness = max(0, int((now - min_next).total_seconds()))
 
-                if staleness > poll_sec * 3:
-                    result["checks"]["stale_exports"] = False
-                    result["healthy"] = False
-                else:
-                    result["checks"]["stale_exports"] = True
-        except Exception as e:
-            result["checks"]["stale_exports"] = False
-            result["healthy"] = False
-            result["stale_error"] = str(e)
+        #         if staleness > poll_sec * 3:
+        #             result["checks"]["stale_exports"] = False
+        #             result["healthy"] = False
+        #             logger.error(
+        #                 f"Healthcheck failed: export tasks stale by {staleness}s (> {poll_sec * 3}s)"
+        #             )
+        #         else:
+        #             result["checks"]["stale_exports"] = True
+        # except Exception as e:
+        #     result["checks"]["stale_exports"] = False
+        #     result["healthy"] = False
+        #     result["stale_error"] = str(e)
+        #     logger.error(f"Healthcheck failed: export staleness check error: {str(e)}")
 
         # Heartbeat file recency
 
         try:
-            hb = Path(HEALTHCHECK_HEARTBEAT_FILE)
+            hb = Path(settings.heartbeat.heartbeat_file)
             txt = hb.read_text(encoding="utf-8").strip()
             last_poll = datetime.fromisoformat(txt)
             age = int((now - last_poll).total_seconds())
@@ -101,6 +107,9 @@ class HealthHandler(BaseHTTPRequestHandler):
                 logger.error(
                     f"Healthcheck failed: last successful poll {age}s ago (> {poll_sec * 3}s)"
                 )
+                logger.error(f"Heartbeat file path: {hb.as_posix()}")
+                logger.error(f"Heartbeat last poll time: {last_poll.isoformat()}")
+                logger.error(f"Current time: {now.isoformat()}")
                 result["checks"]["heartbeat"] = False
                 result["healthy"] = False
                 result["_error"] = "Missing heartbeat file"
@@ -110,6 +119,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             result["checks"]["heartbeat_recent"] = False
             result["healthy"] = False
             result["heartbeat_error"] = str(e)
+            logger.error(f"Healthcheck failed: heartbeat file error: {str(e)}")
 
         return result
 

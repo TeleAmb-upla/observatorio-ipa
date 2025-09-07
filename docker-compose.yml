@@ -1,0 +1,48 @@
+services:
+  osn_auto:
+    image: ericklinares/gee-osn-ipa:0.1.0
+    deploy:
+      replicas: 1 
+      resources: 
+        limits:
+          cpus: '1'
+          memory: '2G'
+
+    
+    environment:
+      - IPA_SETTINGS_TOML=configs/prod.config.toml
+    
+    configs:
+      - source: prod_toml_config
+        target: prod.config.toml
+
+    secrets:
+      - source: service_user
+        target: service_user.json
+      - source: smtp_password
+        target: smtp_password.txt
+      - source: github_app_private_key
+        target: github_app_private_key.pem
+
+    networks:
+      - osn_auto
+    
+    
+secrets:
+  service_user:
+    file: credentials/dummy_credentials.json
+  smtp_user:
+    file: credentials/smtp_user.txt
+  smtp_password: 
+    file: credentials/smtp_password.txt
+  github_app_private_key:
+    file: 'credentials/github_app_private_key.pem'
+
+configs:
+  prod_toml_config:
+    file: configs/prod.config.toml
+  test_toml_config:
+    file: configs/test.config.toml
+
+networks:
+  osn_auto:
