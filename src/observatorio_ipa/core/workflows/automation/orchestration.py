@@ -4,7 +4,6 @@ from pathlib import Path
 from google.oauth2 import service_account
 from google.cloud import storage
 import ee.batch
-from sqlalchemy import case
 from observatorio_ipa.core.workflows.automation.reporting import auto_job_report
 from observatorio_ipa.utils import db
 from observatorio_ipa.core.config import (
