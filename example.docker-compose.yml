@@ -10,7 +10,7 @@ services:
 
     
     environment:
-      - IPA_SETTINGS_TOML=configs/prod.config.toml
+      - IPA_SETTINGS_TOML=prod.config.toml
     
     configs:
       - source: prod_toml_config
