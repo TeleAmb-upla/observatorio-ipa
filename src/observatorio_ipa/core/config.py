@@ -153,19 +153,18 @@ class LogSettings(BaseSettings):
     file: Annotated[
         Path,
         Field(
-            validation_alias="",
+            default=Path("./osn_ipa.log"),
             description="Path to the log file",
         ),
-    ] = Path("./osn_ipa.log")
-    encoding: Annotated[str, Field(default="utf-8", validation_alias="")]
+    ]
+    encoding: Annotated[str, Field(default="utf-8")]
     format: Annotated[
         str,
         Field(
             default="%(asctime)s %(name)s %(levelname)s: %(message)s",
-            validation_alias="",
         ),
     ]
-    date_format: Annotated[str, Field(default="%Y-%m-%d %H:%M:%S", validation_alias="")]
+    date_format: Annotated[str, Field(default="%Y-%m-%d %H:%M:%S")]
 
 
 class ImageExportSettings(BaseSettings):

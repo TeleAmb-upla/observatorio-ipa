@@ -71,7 +71,7 @@ class HealthHandler(BaseHTTPRequestHandler):
                 row = conn.execute(
                     """
                     SELECT MIN(next_check_at) AS min_next
-                    FROM tasks
+                    FROM exports
                     WHERE state IN ('RUNNING')
                 """
                 ).fetchone()

@@ -68,6 +68,7 @@ def init_logging_config(
     This function sets up the logging configuration based on the default settings.
     It configures the logging format, date format, and log file location.
     """
+
     new_logger = logging.getLogger(LOGGER_NAME)
     new_logger.setLevel(config.level)
 
@@ -82,7 +83,7 @@ def init_logging_config(
     # print(new_logger.handlers)
 
     # File handler
-    fh = logging.FileHandler(filename=config.file, encoding=config.encoding)
+    fh = logging.FileHandler(filename=config.file.as_posix(), encoding=config.encoding)
     fh.setLevel(config.level)
     fh.setFormatter(formatter)
     new_logger.addHandler(fh)

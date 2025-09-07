@@ -77,8 +77,8 @@ def main():
 
     # Create logger (Currently file, and Stream if Containerized)
     logger = init_logging_config(
-        runtime_settings.app.logging,
-        parse_to_bool(os.getenv("IPA_CONTAINERIZED", "False")),
+        config=runtime_settings.app.logging,
+        containerized=parse_to_bool(os.getenv("IPA_CONTAINERIZED", "False")),
     )
 
     # ---------Start healthcheck server ---------

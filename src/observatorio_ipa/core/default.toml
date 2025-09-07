@@ -108,11 +108,11 @@ snowline_y_basin_tbl_prefix = "snowline_y_BNA_"
 manifest_source = "file"                               # file or storage
 manifest_path = "/var/lib/observatorio_ipa/manifests/"
 skip_manifest = false
+# force_overwrite = false
 
 ###########################################################
 #                     AUTOMATION                          #
 ###########################################################
-
 [app.automation]
 timezone = "UTC"
 
@@ -120,7 +120,24 @@ timezone = "UTC"
 db_path = "/var/lib/observatorio_ipa/observatorio_ipa.db"
 
 [app.automation.daily_job]
-cron = "0 2 * * *"
+cron = "0 20 * * *"
 
 [app.automation.orchestration_job]
-cron = "0 3 * * *"
+interval_minutes = 5
+
+[app.automation.heartbeat]
+heartbeat_file = "/var/lib/observatorio_ipa/heartbeat.txt"
+
+###########################################################
+#            WEBSITE REPLACEMENT AUTOMATION               #
+###########################################################
+
+[app.automation.website]
+#github.repo_url = "https://github.com/user/example_repo.git"
+# github.app_id = "1234567"
+# github.private_key_path = "/run/secrets/github_app_private_key.pem"
+gcs_base_assets_path = "OSN/stats/"
+local_repo_path = "/var/lib/observatorio_ipa/website_repo/"
+repo_base_assets_path = "assets/csv/"
+work_branch = "stats_update"
+main_branch = "main"
