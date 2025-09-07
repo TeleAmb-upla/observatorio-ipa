@@ -225,6 +225,21 @@ def compare_manifest_to_collection(
     storage_conn: storage.Client | None = None,
     storage_bucket: str | None = None,
 ) -> bool:
+    """Compares collection and image list from manifest to another collection and image list
+
+    Returns True if information in manifest is the same as new collection
+
+    args:
+        manifest_src (str): Source of the manifest. One of 'file', 'storage'
+        manifest_path (str | Path): Path to the manifest file or folder in storage
+        manifest_name (str): Name of the manifest file
+        collection_path (str | Path): Path to the collection folder
+        image_prefix (str): Prefix for the image files
+        storage_conn (storage.Client | None): Storage client if using storage source
+        storage_bucket (str | None): Storage bucket name if using storage source
+    returns:
+        bool: True if manifest matches collection, False otherwise
+    """
 
     manifest_path = Path(manifest_path)
     collection_path = Path(collection_path)
@@ -246,11 +261,11 @@ def compare_manifest_to_collection(
         logger.warning(f"Error reading manifest: {e}")
         manifest = {}
 
-    manifest_collection = Path(manifest.get("image_collection", ""))
-    manifest_images = manifest.get("images", [])
+    manifest_collection_path = Path(manifest.get("image_collection", ""))
+    manifest_images: list = manifest.get("images", [])
 
     return (
-        collection_path == manifest_collection
+        collection_path == manifest_collection_path
         and collection_images.sort() == manifest_images.sort()
     )
 
@@ -465,6 +480,12 @@ def monthly_tbl_export_proc(
 
     logger.debug("Starting monthly table export process")
     # Compare List of monthly Images to Manifest
+
+    #############################################
+    # MANIFEST CHECK                            #
+    #############################################
+
+    # if skip_manifest go directly to export process
     if not skip_manifest:
         logger.debug("Checking manifest")
         if force_overwrite:
@@ -478,8 +499,9 @@ def monthly_tbl_export_proc(
             storage_conn=storage_conn,
             storage_bucket=storage_bucket,
         ):
-            pass
-        else:
+            logger.info(
+                "No significant changes in source collection compared to manifest. Skipping Stats export."
+            )
             return ExportTaskList()
 
     ###########################################
