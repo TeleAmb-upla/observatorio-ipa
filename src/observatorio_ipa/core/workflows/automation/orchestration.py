@@ -1174,6 +1174,13 @@ def auto_stats_export(
     # skip if no images were exported or all failed
     elif not completed_images:
         logger.debug("Skipping stats export - No images exported or all failed")
+        conn.execute(
+            """UPDATE jobs SET 
+                stats_export_status='COMPLETED', 
+                updated_at=? WHERE id=?""",
+            (now_iso, job_id),
+        )
+        conn.commit()
         return
     else:
         logger.debug(f"Starting stats export procedure")
