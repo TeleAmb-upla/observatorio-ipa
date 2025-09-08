@@ -49,7 +49,7 @@ def _make_job_report_context(conn: sqlite3.Connection, job_id: str) -> dict:
     Returns:
         dict: The context for the job report.
     """
-
+    # Get Job
     job = conn.execute("SELECT * FROM jobs WHERE id = ?;", (job_id,)).fetchone()
     if job:
         job_results = {**dict(job)}
@@ -63,6 +63,7 @@ def _make_job_report_context(conn: sqlite3.Connection, job_id: str) -> dict:
             "modis": {},
         }
 
+    # Add Exports
     export_tasks = conn.execute(
         "SELECT * FROM exports WHERE job_id=?", (job_id,)
     ).fetchall()
@@ -71,18 +72,22 @@ def _make_job_report_context(conn: sqlite3.Connection, job_id: str) -> dict:
     else:
         job_results["export_tasks"] = {}
 
+    # Add MODIS
     modis = conn.execute("SELECT * FROM modis WHERE job_id=?", (job_id,)).fetchall()
     if modis:
         job_results["modis"] = [dict(item) for item in modis]
     else:
         job_results["modis"] = {}
 
+    # Add Website Update info
     website_update = conn.execute(
         "SELECT pull_request_id, pull_request_url FROM website_updates WHERE job_id=? ORDER BY created_at DESC LIMIT 1",
         (job_id,),
     ).fetchone()
     if website_update:
         job_results["website_update"] = dict(website_update)
+
+    ###### Data Transformations ######
 
     # Convert string to list of errors split by '|'
     if job_results.get("error"):
@@ -118,6 +123,16 @@ def _make_job_report_context(conn: sqlite3.Connection, job_id: str) -> dict:
             "path",
             keep_keys=["name", "state", "error", "last_error"],
         )
+
+    # Split Stats Exports by state for each path
+    if stats_exports := job_results.get("export_tasks", {}).get("table"):
+        for path in stats_exports.keys():
+            stats_exports[path] = _split_dict_by_key(
+                stats_exports[path],
+                "state",
+                keep_keys=["name", "error", "last_error"],
+            )
+        job_results["export_tasks"]["stats"] = stats_exports
 
     # Split terra/aqua
     if modis := job_results.get("modis"):

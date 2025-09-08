@@ -34,11 +34,14 @@ Tables Exported:
 {%- if export_tasks.table %}
 {%- for path, exports in export_tasks.table.items() %}
   Path: {{ path }}
-  {%- for exp in exports %}
-    |- {{ exp.name }}: {{ exp.state }}
-    {%- if exp.error %}
-      | Error: {{exp.error}}
-    {% endif %}
+  {%- for state, table_exports in exports.items() %}
+    |- {{ state }}: {{ table_exports | length }}
+    {%- for exp in table_exports %}
+      |-- {{ exp.name }} 
+      {%- if exp.error %}
+        | Error: {{exp.error}}
+      {% endif %}
+    {%- endfor %}
   {%- endfor %}
 {% endfor -%}
 {% else %}

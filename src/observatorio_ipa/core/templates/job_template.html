@@ -55,17 +55,10 @@
         {%- for path, exports in export_tasks.table.items() %}
         <p>Path: {{ path }}</p>
         <ul>
-            {%- for exp in exports %}
+            {%- for state, table_exports in exports.items() %}
             <li>
-                <div>
-                    {{ exp.name }}: {{ exp.state }}
-                    {%- if exp.error %}
-                    <br>
-                    |- Error: {{exp.error}}
-                    {% endif %}
-                </div>
+                {{ state }}: {{ table_exports | length }}
             </li>
-    
             {%- endfor %}
         </ul>
         {% endfor -%}
