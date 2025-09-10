@@ -6,26 +6,53 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from observatorio_ipa.core.healthcheck import start_healthcheck_server
-from observatorio_ipa.core import config, cli, setup_db
+from observatorio_ipa.core import config, cli
 from observatorio_ipa.core.config import LOGGER_NAME, HEALTHCHECK_PORT, Settings
 from observatorio_ipa.core.scripting import parse_to_bool
 from observatorio_ipa.core.workflows.automation.orchestration import (
     auto_job_init,
     auto_orchestration,
 )
+from observatorio_ipa.core.dbschema import Base
+from observatorio_ipa.utils.dates import tz_now
 from observatorio_ipa.utils.logs import init_logging_config
-from observatorio_ipa.utils import db
+from observatorio_ipa.services.database import db as db_service
 
 logger = logging.getLogger(LOGGER_NAME)
+
+
+# TODO along with checking that DB exists, also check that schema is OK
+def _check_db_exists(db_path: str | Path) -> None:
+    """Check if DB file exists, if not create a new empty file.
+
+    Args:
+        db_path (str | Path): Path to the SQLite DB file.
+    Raises:
+        SystemExit: If there is an error creating the DB file.
+    """
+    db_path = Path(db_path).expanduser().resolve()
+    if not db_path.is_file():
+        logger.warning(
+            f"SQLite DB file not found at {db_path.as_posix()}. A new DB will be created as first run."
+        )
+        try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            db_path.touch(exist_ok=True)
+            logger.info(f"Created new SQLite DB at {db_path.as_posix()}...")
+        except Exception as e:
+            logger.error(f"Error creating SQLite DB file: {e}")
+            sys.exit(1)
 
 
 def write_poll_heartbeat(
     heartbeat_file: str | Path, timezone: str | None = None
 ) -> None:
     heartbeat_file = Path(heartbeat_file)
-    heartbeat = db.datetime_to_iso(db.tz_now(timezone))
+    heartbeat = tz_now("UTC").isoformat()
     logger.debug(f"Writing poll heartbeat to {heartbeat_file}")
     logger.debug(f"Heartbeat content: {heartbeat}")
 
@@ -44,15 +71,17 @@ def parse_cron_expr(expr: str) -> CronTrigger:
     return CronTrigger(minute=minute, hour=hour, day=day, month=month, day_of_week=dow)
 
 
-def _job_create(settings: Settings) -> None:
+def _job_create(settings: Settings, session_maker: sessionmaker) -> None:
     logger.info("create_jobs: start")
-    auto_job_init(settings)
+    with session_maker() as session:
+        auto_job_init(settings, session)
     logger.info("create_jobs: end")
 
 
-def _job_poll(settings: Settings) -> None:
+def _job_poll(settings: Settings, session_maker: sessionmaker) -> None:
     logger.info("poll_and_orchestrate: start")
-    auto_orchestration(settings)
+    with session_maker() as session:
+        auto_orchestration(settings, session)
     write_poll_heartbeat(
         heartbeat_file=settings.app.automation.heartbeat.heartbeat_file,
         timezone=settings.app.automation.timezone,
@@ -79,54 +108,49 @@ def main():
 
     runtime_settings = config.load_settings_from_toml(toml_file)
 
-    # Create logger (Currently file, and Stream if Containerized)
+    # -------- Create Logger ----------
+    # Currently file, and Stream if Containerized
     logger = init_logging_config(
         config=runtime_settings.app.logging,
         containerized=parse_to_bool(os.getenv("IPA_CONTAINERIZED", "False")),
     )
-
-    # ---------Start healthcheck server ---------
-    health_server = None
-    if parse_to_bool(os.getenv("IPA_CONTAINERIZED", "False")):
-        try:
-            health_server = start_healthcheck_server(
-                runtime_settings.app.automation, port=HEALTHCHECK_PORT
-            )
-            logger.info(f"Healthcheck server started on port {HEALTHCHECK_PORT}")
-        except Exception as e:
-            logger.error(f"Failed to start healthcheck server: {e}")
 
     # ---------- Setting TZ ----------
     tz_str = runtime_settings.app.automation.timezone
     if tz_str:
         try:
             _ = ZoneInfo(tz_str)
-            os.environ["TZ"] = tz_str
+            # os.environ["TZ"] = tz_str # Not used anymore, we'll keep all in UTC
         except Exception as e:
             raise SystemExit(f"Config error: invalid timezone '{tz_str}': {e}")
 
     # ---------- Setting DB ----------
-    db_path_ = runtime_settings.app.automation.db.db_path
-    db_path = Path(db_path_).expanduser().resolve()
-    # Use default DB name if only providing path
-    if db_path.suffix == "":
-        db_path = (db_path / setup_db.DEFAULT_DB_NAME).resolve()
+    db_config = runtime_settings.app.automation.db
 
-    if not db_path.is_file():
-        logger.warning(
-            f"DB file not found at {db_path_}. A new DB will be created as first run."
-        )
-        logger.info(f"Creating new DB at {db_path_}...")
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        setup_db.create_schema(db_path)
+    # Create DB file if not exists (for SQLite)
+    if db_config.type == "sqlite" and db_config.db_path:
+        db_path = Path(db_config.db_path, db_config.db_name).expanduser().resolve()
+        _check_db_exists(db_path)
+
+    SessionLocal = db_service.build_sessionmaker(db_config)
+    # Ensure tables exist
+    with SessionLocal() as session:
+        db_service.ensure_tables_exist(session, Base)
+
+    # ---------Start healthcheck server ---------
+    health_server = None
+    if parse_to_bool(os.getenv("IPA_CONTAINERIZED", "False")):
+        try:
+            health_server = start_healthcheck_server(
+                runtime_settings.app.automation,
+                port=HEALTHCHECK_PORT,
+            )
+            logger.info(f"Healthcheck server started on port {HEALTHCHECK_PORT}")
+        except Exception as e:
+            logger.error(f"Failed to start healthcheck server: {e}")
 
     # ---------- Creating Scheduler ----------
     # Create Scheduler
-    tz_str = runtime_settings.app.automation.timezone
-    try:
-        tz = ZoneInfo(tz_str)
-    except Exception as e:
-        raise SystemExit(f"Config error: invalid timezone '{tz_str}': {e}")
 
     sched = BlockingScheduler(timezone=tz_str, logger=logger)
 
@@ -139,7 +163,7 @@ def main():
     sched.add_job(
         func=_job_create,
         trigger=cron_trigger,
-        kwargs={"settings": runtime_settings},
+        kwargs={"settings": runtime_settings, "session_maker": SessionLocal},
         id="auto_daily_job",
         max_instances=1,
         coalesce=True,
@@ -154,7 +178,7 @@ def main():
     sched.add_job(
         func=_job_poll,
         trigger=IntervalTrigger(minutes=interval_minutes),
-        kwargs={"settings": runtime_settings},
+        kwargs={"settings": runtime_settings, "session_maker": SessionLocal},
         id="auto_orchestration",
         max_instances=1,  # prevent overlapping polls from APScheduler side
         coalesce=True,  # if we fall behind, run once (not catch up N times)
@@ -178,6 +202,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # Start healthcheck server before main scheduler
-    # start_healthcheck_server(port=int(os.getenv("HEALTHCHECK_PORT", "8080")))
     main()

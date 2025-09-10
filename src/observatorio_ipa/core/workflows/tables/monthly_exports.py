@@ -1,5 +1,6 @@
 # Rollback helper: record file transfers for rollback
 import re, json, logging
+import pytz
 from pathlib import Path
 from datetime import datetime, date
 import ee
@@ -78,7 +79,7 @@ def create_manifest(
     images.sort()
 
     manifest = {
-        "date_created": datetime.now().isoformat(),
+        "date_created": datetime.now(tz=pytz.UTC).isoformat(),
         "metadata": meta,
         "source": {
             "image_collection": collection_path.as_posix(),
@@ -175,7 +176,7 @@ def read_manifest_from_file(manifest_path: str | Path, manifest_name: str) -> di
 
 
 def read_manifest_from_storage(
-    conn: storage.Client,
+    storage_conn: storage.Client,
     storage_bucket: str,
     manifest_path: str | Path,
     name: str,
@@ -183,7 +184,7 @@ def read_manifest_from_storage(
 ) -> dict:
     full_path = Path(manifest_path, name)
     try:
-        bucket = conn.bucket(storage_bucket)
+        bucket = storage_conn.bucket(storage_bucket)
         blob = bucket.blob(full_path.as_posix())
         manifest_json = blob.download_as_text()
         return json.loads(manifest_json)
@@ -196,18 +197,18 @@ def get_manifest(
     source: str,
     manifest_path: str | Path,
     manifest_name: str,
-    conn: storage.Client | None,
+    storage_conn: storage.Client | None,
     storage_bucket: str | None,
 ) -> dict:
     manifest_path = Path(manifest_path)
     match source:
         case "storage":
-            if not conn or not storage_bucket:
+            if not storage_conn or not storage_bucket:
                 raise ValueError(
                     "Storage client and bucket name must be provided for storage source."
                 )
             return read_manifest_from_storage(
-                conn, storage_bucket, manifest_path, manifest_name
+                storage_conn, storage_bucket, manifest_path, manifest_name
             )
 
         case "file":
@@ -808,7 +809,7 @@ def monthly_tbl_export_proc(
             source=settings["manifest_source"],
             manifest_path=settings["manifest_path"],
             manifest_name="monthly_manifest.json",
-            conn=storage_conn,
+            storage_conn=storage_conn,
             storage_bucket=storage_bucket,
         )
     except Exception as e:

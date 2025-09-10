@@ -1,11 +1,18 @@
-import sqlite3, logging, random, time, re, pytz, os
+import logging
+import random
+import time
+import re
+import pytz
+import os
 from datetime import datetime, date
 from pathlib import Path
+from sqlalchemy import text, Row, insert, select, update, inspect
+from sqlalchemy.orm import Session
 from google.oauth2 import service_account
 from google.cloud import storage
 import ee.batch
+from observatorio_ipa.utils import dates as utils_dates
 from observatorio_ipa.core.workflows.automation.reporting import auto_job_report
-from observatorio_ipa.utils import db
 from observatorio_ipa.core.config import (
     Settings,
     ImageExportSettings,
@@ -19,11 +26,20 @@ from observatorio_ipa.core.workflows.automation.website_update import (
 )
 from observatorio_ipa.services.gee.exports import ExportTaskList, ExportTask
 from observatorio_ipa.services.gee import dates as gee_dates
+from observatorio_ipa.services.database import db as db_service
 from observatorio_ipa.services import connections
 from observatorio_ipa.core.defaults import (
     DEFAULT_TERRA_COLLECTION,
     DEFAULT_AQUA_COLLECTION,
 )
+from observatorio_ipa.core.dbschema import (
+    Job,
+    Export,
+    Modis,
+    WebsiteUpdate,
+    FileTransfer,
+)
+
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -103,59 +119,77 @@ def _dummy_stats_exportTaskList(job_id: str) -> ExportTaskList:
     return ExportTaskList([dummy_stat_task1, dummy_stat_task2])
 
 
-def _print_job(conn: sqlite3.Connection, job_id: str) -> None:
+# ALCHEMY DONE
+def _print_job(session: Session, job_id: str) -> None:
     """Print first 8 characters of job_id and job details"""
-    job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-    job_dict = dict(job)
-    job_dict["id"] = job["id"][0:7]
-    print(job_dict)
+    job = session.get(Job, job_id)
+    if job:
+        job_dict = db_service.model_to_dict(job)
+        job_dict["id"] = job_dict["id"][0:8]
+        print(job_dict)
 
 
 def _join_error_msgs(msg1: str | None, msg2: str | None) -> str | None:
     """Join two error messages into one, separated by ' | '."""
-    if not msg1 and not msg2:
+
+    if not isinstance(msg1, str) or not isinstance(msg2, str):
+        raise ValueError("Both msg1 and msg2 must be strings or None")
+
+    # split by ' | ' and remove empty strings
+    if msg1:
+        msg1_parts = [part.strip() for part in msg1.split(" | ") if part.strip()]
+    else:
+        msg1_parts = []
+    if msg2:
+        msg2_parts = [part.strip() for part in msg2.split(" | ") if part.strip()]
+    else:
+        msg2_parts = []
+
+    # Return None if both messages are empty or None
+    if not msg1_parts and not msg2_parts:
         return None
-    error_msg = (msg1 or "").strip() + " | " + (msg2 or "").strip()
+
+    # Join with [' | ']
+    error_msg = " | ".join(msg1_parts + msg2_parts)
     return error_msg
 
 
+# ALCHEMY DONE
 def add_exportTask_to_db(
-    conn: sqlite3.Connection, job_id: str, export_task: ExportTask
+    session: Session, job_id: str, export_task: ExportTask
 ) -> None:
     """Add an ExportTask to 'exports' database table."""
 
-    now_iso = db.datetime_to_iso(db.tz_now())
+    now = utils_dates.tz_now()
     db_task_state = _map_export_task_to_db_state(export_task)
 
-    conn.execute(
-        """INSERT INTO exports (
-            id, job_id, state, type, name, target, path, task_id, 
-            task_status, error, next_check_at, poll_interval_sec, 
-            created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            export_task.id,
-            job_id,
-            db_task_state,
-            export_task.type,
-            export_task.name,
-            export_task.target,
-            export_task.path.as_posix(),
-            getattr(export_task.task, "id", None),
-            export_task.task_status,
-            export_task.error,
-            now_iso,
-            DEFAULT_POLLING_INTERVAL_SEC,
-            now_iso,
-            now_iso,
-        ),
+    session.execute(
+        insert(Export).values(
+            id=export_task.id,
+            job_id=job_id,
+            state=db_task_state,
+            type=export_task.type,
+            name=export_task.name,
+            target=export_task.target,
+            path=export_task.path.as_posix(),
+            task_id=getattr(export_task.task, "id", None),
+            task_status=export_task.task_status,
+            error=export_task.error,
+            next_check_at=now,
+            poll_interval_sec=DEFAULT_POLLING_INTERVAL_SEC,
+            created_at=now,
+            updated_at=now,
+        )
     )
 
+    session.commit()
 
-def create_job(conn: sqlite3.Connection, timezone: str) -> str:
+
+# ALCHEMY DONE
+def create_job(session: Session, timezone: str) -> str:
     """Creates and adds a new job to 'jobs' database table.
     Args:
-        conn (sqlite3.Connection): The database connection.
+        session (Session): The database session.
         timezone (str): a valid timezone.
 
     Returns:
@@ -165,44 +199,45 @@ def create_job(conn: sqlite3.Connection, timezone: str) -> str:
     if timezone not in pytz.all_timezones:
         raise ValueError(f"Invalid timezone: {timezone}")
 
-    now = db.tz_now()
-    job_id = db.new_id()
+    now = utils_dates.tz_now(tz=timezone)
+    job_id = db_service.new_id()
 
-    conn.execute(
-        """INSERT INTO jobs (id, job_status, timezone, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)""",
-        (
-            job_id,
-            "RUNNING",
-            timezone,
-            db.datetime_to_iso(now),
-            db.datetime_to_iso(now),
-        ),
+    session.execute(
+        insert(Job).values(
+            id=job_id,
+            job_status="RUNNING",
+            timezone=timezone,
+            created_at=now,
+            updated_at=now,
+        )
     )
+    session.commit()
     return job_id
 
 
-def _get_state_of_tasks(conn: sqlite3.Connection, job_id: str, type: str) -> list[str]:
+# ALCHEMY DONE
+def _get_state_of_tasks(session: Session, job_id: str, export_type: str) -> list[str]:
     """
     Get the state of tasks for a specific job and type.
 
     Args:
-        conn (sqlite3.Connection): The database connection.
+        session (Session): The database session.
         job_id (str): The ID of the job.
-        type (str): The type of tasks to query [image, stats].
+        export_type (str): The type of tasks to query [image, stats].
 
     Returns:
         list: A list of task states.
     """
-    rows = conn.execute(
-        "SELECT state FROM exports WHERE job_id=? AND type=?", (job_id, type)
-    ).fetchall()
-    return [r["state"] for r in rows]
+    rows = session.execute(
+        select(Export.state).where(Export.job_id == job_id, Export.type == export_type)
+    )
+    return [r.state for r in rows]
 
 
-def _save_modis_status(conn: sqlite3.Connection, job_id: str) -> None:
+# ALCHEMY DONE
+def _save_modis_status(session: Session, job_id: str) -> None:
     """Saves the MODIS Terra and Aqua image collection status to 'modis' database table."""
-    now_iso = db.datetime_to_iso(db.tz_now())
+    now = utils_dates.tz_now()
     ee_terra_ic = ee.imagecollection.ImageCollection(DEFAULT_TERRA_COLLECTION)
     ee_aqua_ic = ee.imagecollection.ImageCollection(DEFAULT_AQUA_COLLECTION)
     terra_image_dates = gee_dates.get_collection_dates(ee_terra_ic)
@@ -210,67 +245,69 @@ def _save_modis_status(conn: sqlite3.Connection, job_id: str) -> None:
     terra_image_dates.sort()
     aqua_image_dates.sort()
     if terra_image_dates:
-        conn.execute(
-            """INSERT INTO modis 
-                    (job_id, name, collection, images, last_image, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                job_id,
-                "terra",
-                DEFAULT_TERRA_COLLECTION,
-                len(terra_image_dates),
-                terra_image_dates[-1] if terra_image_dates else None,
-                now_iso,
-                now_iso,
-            ),
+        session.execute(
+            insert(Modis).values(
+                job_id=job_id,
+                name="terra",
+                collection=DEFAULT_TERRA_COLLECTION,
+                images=len(terra_image_dates),
+                last_image=terra_image_dates[-1] if terra_image_dates else None,
+                created_at=now,
+                updated_at=now,
+            )
         )
+        session.commit()
+
     if aqua_image_dates:
-        conn.execute(
-            """INSERT INTO modis 
-                     (job_id, name, collection, images, last_image, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                job_id,
-                "aqua",
-                DEFAULT_AQUA_COLLECTION,
-                len(aqua_image_dates),
-                aqua_image_dates[-1] if aqua_image_dates else None,
-                now_iso,
-                now_iso,
-            ),
+        session.execute(
+            insert(Modis).values(
+                job_id=job_id,
+                name="aqua",
+                collection=DEFAULT_AQUA_COLLECTION,
+                images=len(aqua_image_dates),
+                last_image=aqua_image_dates[-1] if aqua_image_dates else None,
+                created_at=now,
+                updated_at=now,
+            )
         )
+        session.commit()
 
 
-def update_job(conn: sqlite3.Connection, job_id: str) -> None:
+# ALCHEMY DONE
+# TODO: Split this into smaller functions
+def update_job(session: Session, job_id: str) -> None:
     """Updates the job statuses based on the statuses of associated export tasks."""
 
     # print(f"Updating status for job {job_id}")
 
-    now_iso = db.datetime_to_iso(db.tz_now())
+    now = utils_dates.tz_now()
+
     # Exit if job is not RUNNING - Assumes Nothing Needs Update
-    job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    job = session.get(Job, job_id)
     if not job:
         raise ValueError(f"Job with id {job_id} not found")
 
-    if job["job_status"] != "RUNNING":
+    if job.job_status != "RUNNING":
         return
 
     # print("Checking Image status")
     # ---------- IMAGE_EXPORT_STATUS ----------
-    image_states = _get_state_of_tasks(conn, job_id, "image")
-    match job["image_export_status"]:
+    image_states = _get_state_of_tasks(session, job_id, "image")
+    match job.image_export_status:
         case "NOT_REQUIRED":
             # Not Normal - state shouldn't exist
             error_message = _join_error_msgs(
-                job["error"],
+                job.error,
                 "Program produced an abnormal state while running Image export procedure.",
             )
-            conn.execute(
-                """UPDATE jobs SET 
-                image_export_status='FAILED',
-                error=?, updated_at=? WHERE id=?""",
-                (error_message, now_iso, job_id),
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    image_export_status="FAILED", error=error_message, updated_at=now
+                )
             )
+            session.commit()
             return
 
         case "PENDING":
@@ -282,14 +319,17 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
             else:
                 # Not Normal - Export tasks might have been created but failed to update Job Status and never changed to "RUNNING"
                 error_message = _join_error_msgs(
-                    job["error"],
+                    job.error,
                     "One or more Image tasks might have failed to create or could not be saved to DB. Check logs and GEE tasks for details.",
                 )
-                conn.execute(
-                    """UPDATE jobs SET 
-                        image_export_status='FAILED',
-                        error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        image_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
                 )
                 return
 
@@ -297,38 +337,46 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
             if not image_states:
                 # Not Normal: If image_export_status = RUNNING, at least 1 image export should be present
                 error_message = _join_error_msgs(
-                    job["error"],
+                    job.error,
                     "One or more Image tasks might have failed to create or could not be saved to DB. Check logs and GEE tasks for details.",
                 )
-                conn.execute(
-                    """UPDATE jobs SET 
-                        image_export_status='FAILED', 
-                        error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        image_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
                 )
+                session.commit()
                 return
 
             elif all(s != "RUNNING" for s in image_states):
-                # Normal: All image export tasks have now completed
                 if any(s == "FAILED" for s in image_states):
                     error_message = _join_error_msgs(
-                        job["error"],
+                        job.error,
                         "One or more image exports failed",
                     )
-                    conn.execute(
-                        """UPDATE jobs SET 
-                            image_export_status='FAILED', 
-                            error=?, updated_at=? WHERE id=?""",
-                        (error_message, now_iso, job_id),
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(
+                            image_export_status="FAILED",
+                            error=error_message,
+                            updated_at=now,
+                        )
                     )
+                    session.commit()
                     return
                 else:
-                    conn.execute(
-                        """UPDATE jobs SET 
-                            image_export_status='COMPLETED', 
-                            updated_at=? WHERE id=?""",
-                        (now_iso, job_id),
+                    # Normal: All image export tasks have now completed
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(image_export_status="COMPLETED", updated_at=now)
                     )
+                    session.commit()
             else:
                 # Normal: 1+ exports are still running - No change - keep "RUNNING" state
                 return
@@ -340,40 +388,44 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
         case "COMPLETED":
             if not image_states:
                 # Normal. No Images required exporting. Set to Skip Stats Export
-                if job["stats_export_status"] in (None, "PENDING"):
-                    conn.execute(
-                        """UPDATE jobs SET 
-                            stats_export_status='NOT_REQUIRED', 
-                            updated_at=? WHERE id=?""",
-                        (now_iso, job_id),
+                if job.stats_export_status in (None, "PENDING"):
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(stats_export_status="NOT_REQUIRED", updated_at=now)
                     )
+                    session.commit()
                     return
             elif any(s == "RUNNING" for s in image_states):
                 # Not Normal: Not expecting to still be 'RUNNING' exports if image_export_status is COMPLETED
                 # revert to "RUNNING" stats has not Ran
-                if job["stats_export_status"] in (
+                if job.stats_export_status in (
                     "NOT_REQUIRED",
                     "PENDING",
                 ):
-                    conn.execute(
-                        """UPDATE jobs SET 
-                        image_export_status='RUNNING', 
-                        updated_at=? WHERE id=?""",
-                        (now_iso, job_id),
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(image_export_status="RUNNING", updated_at=now)
                     )
+                    session.commit()
                 return
             elif any(s == "FAILED" for s in image_states):
                 # Not Normal: If image_export_status = COMPLETED, No images should have failed
                 error_message = _join_error_msgs(
-                    job["error"],
+                    job.error,
                     "One or more image exports failed",
                 )
-                conn.execute(
-                    """UPDATE jobs SET 
-                        image_export_status='FAILED', 
-                        error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        image_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
                 )
+                session.commit()
                 return
             else:
                 # Normal: Continue to stats status assessment
@@ -382,52 +434,57 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
         case _:
             # Not Normal: Unknown state: Set as failed
             error_message = _join_error_msgs(
-                job["error"],
+                job.error,
                 "Image export procedure entered an unknown state",
             )
-            conn.execute(
-                """UPDATE jobs SET 
-                    image_export_status='FAILED', 
-                    error=?, updated_at=? WHERE id=?""",
-                (error_message, now_iso, job_id),
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    image_export_status="FAILED", error=error_message, updated_at=now
+                )
             )
             return
 
     # ---------- STATS_EXPORT_STATUS ----------
     # Sanity check in case I missed something above
 
-    if job["image_export_status"] in ["NOT_REQUIRED", "PENDING", "RUNNING"] or any(
+    if job.image_export_status in ["NOT_REQUIRED", "PENDING", "RUNNING"] or any(
         s == "RUNNING" for s in image_states
     ):
         return
 
     # print("Checking Stats status")
-    table_states = _get_state_of_tasks(conn, job_id, "table")
-    match job["stats_export_status"]:
+    table_states = _get_state_of_tasks(session, job_id, "table")
+    match job.stats_export_status:
         case "NOT_REQUIRED":
             # print("Successfully entered NOT_REQUIRED")
             if not table_states:
                 # print("Successfully entered no stat tasks")
                 # Normal: No table export required/Expected
-                conn.execute(
-                    """UPDATE jobs SET 
-                        stats_export_status='COMPLETED', 
-                        updated_at=? WHERE id=?""",
-                    (now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(stats_export_status="COMPLETED", updated_at=now)
                 )
+                session.commit()
                 return
             else:
                 # Not Normal - Export tasks might have been created but failed to update Job Status
                 error_message = _join_error_msgs(
-                    job["error"],
+                    job.error,
                     "Program produced an abnormal state while running Stats export procedure.",
                 )
-                conn.execute(
-                    """UPDATE jobs SET 
-                        stats_export_status='FAILED',
-                        error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        stats_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
                 )
+                session.commit()
                 return
 
         case "PENDING":
@@ -439,52 +496,64 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
             else:
                 # Not Normal: Export tasks might have been created but failed to update Job Status
                 error_message = _join_error_msgs(
-                    job["error"],
+                    job.error,
                     "One or more Stats tasks might have failed to create or save to DB. Check logs and GEE tasks for details.",
                 )
-                conn.execute(
-                    """UPDATE jobs SET 
-                        stats_export_status='FAILED',
-                        error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        stats_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
                 )
+                session.commit()
                 return
 
         case "RUNNING":
             if not table_states:
                 # Not Normal: If stats_export_status = RUNNING, at least 1 stats export should be present
                 error_message = _join_error_msgs(
-                    job["error"],
+                    job.error,
                     "One or more Stats tasks might have failed to create or save to DB. Check logs and GEE tasks for details.",
                 )
-                conn.execute(
-                    """UPDATE jobs SET 
-                    stats_export_status='FAILED', 
-                    error=?, updated_at=? WHERE id=?""",
-                    (error_message, now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        stats_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
                 )
+                session.commit()
                 return
 
             elif all(s != "RUNNING" for s in table_states):
                 if any(s == "FAILED" for s in table_states):
                     error_message = _join_error_msgs(
-                        job["error"],
+                        job.error,
                         "One or more Stats exports failed",
                     )
-                    conn.execute(
-                        """UPDATE jobs SET 
-                            stats_export_status='FAILED', 
-                            error=?, updated_at=? WHERE id=?""",
-                        (error_message, now_iso, job_id),
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(
+                            stats_export_status="FAILED",
+                            error=error_message,
+                            updated_at=now,
+                        )
                     )
+                    session.commit()
                     return
                 else:
-                    conn.execute(
-                        """UPDATE jobs SET 
-                            stats_export_status='COMPLETED', 
-                            updated_at=? WHERE id=?""",
-                        (now_iso, job_id),
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(stats_export_status="COMPLETED", updated_at=now)
                     )
+                    session.commit()
             else:
                 # Normal: 1+ exports are still running - No change - keep "RUNNING" state
                 return
@@ -497,25 +566,27 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
             if not table_states:
                 # Normal: Finished without any exports. Continue to update Job Status
                 pass
-            if any(s == "RUNNING" for s in table_states):
+            elif any(s == "RUNNING" for s in table_states):
                 # Not Normal: Not expecting to still be 'RUNNING' exports if stats_export_status is COMPLETED
                 # revert to "RUNNING" stats until all tasks complete if reporting has not gone out
-                conn.execute(
-                    """UPDATE jobs SET 
-                    stats_export_status='RUNNING', 
-                    updated_at=? WHERE id=?""",
-                    (now_iso, job_id),
-                )
-                return
+                if job.report_status in ("PENDING"):
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(stats_export_status="RUNNING", updated_at=now)
+                    )
+                    session.commit()
+                    return
             else:
                 if any(s == "FAILED" for s in table_states):
                     # Not Normal: If any exports failed, set to "FAILED"
-                    conn.execute(
-                        """UPDATE jobs SET 
-                        stats_export_status='FAILED', 
-                        updated_at=? WHERE id=?""",
-                        (now_iso, job_id),
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(stats_export_status="FAILED", updated_at=now)
                     )
+                    session.commit()
+                    return
                 else:
                     # Normal: Continue to Job status assessment
                     pass
@@ -523,78 +594,83 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
         case _:
             # Not Normal: Unknown state: Set as failed
             error_message = _join_error_msgs(
-                job["error"],
+                job.error,
                 "Stats export procedure entered an unknown state",
             )
-            conn.execute(
-                """UPDATE jobs SET 
-                    stats_export_status='FAILED', 
-                    error=?, updated_at=? WHERE id=?""",
-                (error_message, now_iso, job_id),
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    stats_export_status="FAILED", error=error_message, updated_at=now
+                )
             )
+            session.commit()
             return
 
     # ---------- WEBSITE_UPDATE_STATUS ----------
     # Sanity check in case I missed something above
     # fmt: off
-    if (job["stats_export_status"] in ["NOT_REQUIRED", "PENDING", "RUNNING"] or 
+    if (job.stats_export_status in ["NOT_REQUIRED", "PENDING", "RUNNING"] or 
     any(s == "RUNNING" for s in image_states) or 
     any(s == "RUNNING" for s in table_states)):
         return
     # fmt: on
 
     # Fetch website update tasks
-    website_job = conn.execute(
-        "SELECT * FROM website_updates WHERE job_id=?",
-        (job_id,),
-    ).fetchone()
+    website_job = session.scalars(
+        select(WebsiteUpdate).where(WebsiteUpdate.job_id == job_id)
+    ).first()
 
     # Stop if website update task hasn't been created. Run - Auto_website_update()
     if not website_job:
         return
 
-    match website_job["status"]:
+    match website_job.status:
         case "PENDING" | "RUNNING":
-            if website_job["status"] != job["website_update_status"]:
+            if website_job.status != job.website_update_status:
                 # Update status in Job
-                conn.execute(
-                    """UPDATE jobs SET 
-                        website_update_status=?, updated_at=? 
-                        WHERE id=?""",
-                    (website_job["status"], now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(website_update_status=website_job.status, updated_at=now)
                 )
+                session.commit()
                 return
             else:
                 # Still running, do nothing
                 return
 
         case "COMPLETED":
-            if website_job["status"] != job["website_update_status"]:
+            if website_job.status != job.website_update_status:
                 # Update status in Job
-                conn.execute(
-                    """UPDATE jobs SET 
-                        website_update_status=?, updated_at=? 
-                        WHERE id=?""",
-                    (website_job["status"], now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(website_update_status=website_job.status, updated_at=now)
                 )
+                session.commit()
                 return
             else:
                 # Completed, move on to Job Status Update
                 pass
 
         case "FAILED":
-            if website_job["status"] != job["website_update_status"]:
+            if website_job.status != job.website_update_status:
                 # Update status in Job
                 error_message = _join_error_msgs(
-                    job["error"],
-                    website_job["last_error"],
+                    job.error,
+                    website_job.last_error,
                 )
-                conn.execute(
-                    """UPDATE jobs SET 
-                        website_update_status=?, error=?, updated_at=? 
-                        WHERE id=?""",
-                    (website_job["status"], error_message, now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        website_update_status=website_job.status,
+                        error=error_message,
+                        updated_at=now,
+                    )
                 )
+                session.commit()
                 return
             else:
                 # Completed, move on to Job Status Update
@@ -603,47 +679,47 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
         case _:
             # Not Normal: Unknown state: Set as failed
             error_message = "Program produced an abnormal state while running Website update procedure."
-            conn.execute(
-                """UPDATE website_updates SET 
-                    status='FAILED', 
-                    last_error=?, updated_at=? 
-                    WHERE job_id=?""",
-                (error_message, now_iso, job_id),
+            session.execute(
+                update(WebsiteUpdate)
+                .where(WebsiteUpdate.job_id == job_id)
+                .values(status="FAILED", last_error=error_message, updated_at=now)
             )
+            session.commit()
             return
 
     # -------------- JOB_STATUS --------------
     # Sanity check in case I missed something above
     # fmt: off
-    if (job["website_update_status"] in ["PENDING", "RUNNING"] or 
+    if (job.website_update_status in ["PENDING", "RUNNING"] or 
     any(s == "RUNNING" for s in image_states) or 
     any(s == "RUNNING" for s in table_states)):
         return
     # fmt: on
 
-    match job["job_status"]:
+    match job.job_status:
         case "RUNNING":
             if (
-                job["image_export_status"] == "FAILED"
-                or job["stats_export_status"] == "FAILED"
-                or job["website_update_status"] == "FAILED"
+                job.image_export_status == "FAILED"
+                or job.stats_export_status == "FAILED"
+                or job.website_update_status == "FAILED"
             ):
                 # Not Normal: If any exports failed, set to "FAILED"
                 # No error message required, should have been set in image or stats updates
-                conn.execute(
-                    """UPDATE jobs SET 
-                    job_status='FAILED',
-                    updated_at=? WHERE id=?""",
-                    (now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(job_status="FAILED", updated_at=now)
                 )
+                session.commit()
+                return
             else:
                 # Normal: Finished Successfully
-                conn.execute(
-                    """UPDATE jobs SET 
-                    job_status='COMPLETED',
-                    updated_at=? WHERE id=?""",
-                    (now_iso, job_id),
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(job_status="COMPLETED", updated_at=now)
                 )
+                session.commit()
             return
 
         case "FAILED" | "COMPLETED":
@@ -652,95 +728,94 @@ def update_job(conn: sqlite3.Connection, job_id: str) -> None:
         case _:
             # Not Normal: Unknown state: Set as failed
             error_message = _join_error_msgs(
-                job["error"],
+                job.error,
                 "Job execution entered an unknown state",
             )
-            conn.execute(
-                """UPDATE jobs SET 
-                    job_status='FAILED', 
-                    error=?, updated_at=? WHERE id=?""",
-                (error_message, now_iso, job_id),
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(job_status="FAILED", error=error_message, updated_at=now)
             )
+            session.commit()
             return
 
     return
 
 
-def _lease_due_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+# ALCHEMY DONE
+def _lease_due_tasks(session: Session) -> list[Export]:
     """
     Returns a list of tasks that are due for status check.
 
     Sets a lease time for the tasks to prevent multiple workers from processing the same task simultaneously.
     """
-    now = db.tz_now()
-    now_iso = db.datetime_to_iso(now)
+    now = utils_dates.tz_now()
     # original code pulled everything with state ('PENDING','RUNNING','SUCCEEDED','FAILED','TIMED_OUT')
     # Why is TIMED_OUT still being included?
-    conn.execute(
-        f"""
-        UPDATE exports SET lease_until = ? 
-        WHERE id in (
-            SELECT id FROM exports 
-            WHERE state in ('RUNNING', 'TIMED_OUT') 
-                AND next_check_at <= ? 
-                AND (lease_until is NULL OR lease_until <= ?)
-            LIMIT {MAX_BATCH_SIZE}
-            )""",
-        (db.now_iso_plus(LEASE_SECONDS), now_iso, now_iso),
+    subq = (
+        select(Export.id)
+        .where(
+            Export.state.in_(["RUNNING", "TIMED_OUT"]),
+            Export.next_check_at <= now,
+            (Export.lease_until == None) | (Export.lease_until <= now),
+        )
+        .limit(MAX_BATCH_SIZE)
     )
-    conn.commit()
+    session.execute(
+        update(Export)
+        .where(Export.id.in_(subq))
+        .values(lease_until=utils_dates.now_plus(seconds=LEASE_SECONDS))
+    )
+    session.commit()
 
     #! Review, this would pull all records with lease set before this run. Leases are 60 seconds and polls will be 120 so there shouldn't be any pending leases
     #! but, if multiple workers are running they might pull each other's leases
-    rows = conn.execute(
-        """
-        SELECT * FROM exports 
-        WHERE lease_until > ? 
-            AND next_check_at <=?
-        """,
-        (now_iso, now_iso),
-    ).fetchall()
+    rows = session.scalars(
+        select(Export).where(Export.lease_until > now, Export.next_check_at <= now)
+    )
 
-    return rows
+    return [row for row in rows if row]
 
 
-def exportTask_from_db_row(db_row: sqlite3.Row) -> ExportTask:
+# ALCHEMY DONE
+def exportTask_from_db_row(db_row: Row) -> ExportTask:
     """Creates an ExportTask from a db export row
 
-    Expects a sqlite3.Row object set with 'sqlite3.Connection.row_factory = sqlite3.Row'.
+    Expects a SQLAlchemy Row object.
     """
 
-    # TODO: Change DB type to match ee.batch.Task.Type
+    # Change DB type to match ee.batch.Task.type
     try:
-        match db_row["type"]:
+        match db_row.type:
             case "image":
                 task_type = ee.batch.Task.Type["EXPORT_IMAGE"]
             case "table":
                 task_type = ee.batch.Task.Type["EXPORT_TABLE"]
             case _:
-                raise ValueError(f"Unknown export type: {db_row['type']}")
+                raise ValueError(f"Unknown export type: {db_row.type}")
 
-        task_state = ee.batch.Task.State[db_row["state"]]
+        task_state = ee.batch.Task.State[db_row.state]
         task = ee.batch.Task(
-            task_id=db_row["task_id"], task_type=task_type, state=task_state
+            task_id=db_row.task_id, task_type=task_type, state=task_state
         )
 
     except Exception as e:
         task = None
 
     return ExportTask(
-        type=db_row["type"],
-        name=db_row["name"],
-        target=db_row["target"],
-        path=db_row["path"],
+        type=db_row.type,
+        name=db_row.name,
+        target=db_row.target,
+        path=db_row.path,
         task=task,
-        task_status=db_row["task_status"],
-        id=db_row["id"],
+        task_status=db_row.task_status,
+        id=db_row.id,
     )
 
 
+# ALCHEMY DONE
 # TODO: Review deadline_at usage for tasks
-def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row) -> None:
+def update_task_status(session: Session, db_task: Row) -> None:
     """Updates the status of a GEE task and saves status in 'tasks' database table.
 
     Given a sqlite3.Row (query row) object representing a task, will convert to
@@ -748,29 +823,28 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row) -> None:
     accordingly
 
     args:
-        conn (sqlite3.Connection): Database connection object.
+        session (Session): Session object for the database.
         db_task (sqlite3.Row): Database row representing the task to update.
 
     """
-    now = db.tz_now()
-    now_iso = db.datetime_to_iso(now)
-    next_poll_interval = db.next_backoff(db_task["poll_interval_sec"])
-    next_check_at = db.dt_iso_plus(now, next_poll_interval)
+    now = utils_dates.tz_now()
+    next_poll_interval = db_service.next_backoff(db_task.poll_interval_sec)
+    next_check_at = utils_dates.dt_plus(now, next_poll_interval)
 
     # Only poll task status if not terminal. This is a double check in case a task with this status is provided
-    if db_task["state"] in ["COMPLETED", "FAILED", "TIMED_OUT"]:
+    if db_task.state in ["COMPLETED", "FAILED", "TIMED_OUT"]:
         return
 
     #! deadline_at is not set anywhere, needs review
-    if db_task["deadline_at"] and datetime.fromisoformat(db_task["deadline_at"]) < now:
-        print(
-            f"Task {db_task['id']} is past its deadline. updating status to TIMED_OUT"
-        )
+    if db_task.deadline_at and db_task.deadline_at < now:
+        print(f"Task {db_task.id} is past its deadline. updating status to TIMED_OUT")
 
-        conn.execute(
-            """UPDATE exports SET state = 'TIMED_OUT', updated_at=? WHERE id = ?""",
-            (now_iso, db_task["id"]),
+        session.execute(
+            update(Export)
+            .where(Export.id == db_task.id)
+            .values(state="TIMED_OUT", updated_at=now)
         )
+        session.commit()
         return
 
     # --- GET TASK STATUS FROM GEE ---
@@ -783,65 +857,84 @@ def update_task_status(conn: sqlite3.Connection, db_task: sqlite3.Row) -> None:
 
     except Exception as e:
         # Not Normal: Backoff if error in getting status - Try again later
-        conn.execute(
-            """UPDATE exports SET attempts=attempts+1, poll_interval_sec=?, next_check_at=?, error=?, updated_at=? WHERE id = ?""",
-            (
-                next_poll_interval,
-                next_check_at,
-                str(e),
-                now_iso,
-                db_task["id"],
-            ),
+        session.execute(
+            update(Export)
+            .where(Export.id == db_task.id)
+            .values(
+                attempts=Export.attempts + 1,
+                poll_interval_sec=next_poll_interval,
+                next_check_at=next_check_at,
+                error=str(e),
+                updated_at=now,
+            )
         )
+        session.commit()
         return
 
     # --- UPDATE TASK STATE IN DB ---
     match new_db_export_state:
         case "RUNNING":
             # Normal: Backoff if task is still running - Try again later
-            conn.execute(
-                """UPDATE exports SET state = 'RUNNING', task_status=?, poll_interval_sec=?, next_check_at=?, updated_at=? WHERE id = ?""",
-                (
-                    new_task_status,
-                    next_poll_interval,
-                    next_check_at,
-                    now_iso,
-                    db_task["id"],
-                ),
+            session.execute(
+                update(Export)
+                .where(Export.id == db_task.id)
+                .values(
+                    task_status=new_task_status,
+                    poll_interval_sec=next_poll_interval,
+                    next_check_at=next_check_at,
+                    updated_at=now,
+                )
             )
+
+            session.commit()
+
         case "COMPLETED":
             # Normal: Task completed successfully
-            conn.execute(
-                """UPDATE exports SET state = 'COMPLETED', task_status=?, error = NULL, updated_at=? WHERE id = ?""",
-                (
-                    new_task_status,
-                    now_iso,
-                    db_task["id"],
-                ),
+            session.execute(
+                update(Export)
+                .where(Export.id == db_task.id)
+                .values(
+                    state="COMPLETED",
+                    task_status=new_task_status,
+                    error=None,
+                    updated_at=now,
+                )
             )
+            session.commit()
         case "FAILED":
             # Not Normal: Task failed - Mark as FAILED
-            conn.execute(
-                """UPDATE exports SET state = 'FAILED', task_status=?, updated_at=?, error = ? WHERE id = ?""",
-                (new_task_status, now_iso, new_error, db_task["id"]),
+            session.execute(
+                update(Export)
+                .where(Export.id == db_task.id)
+                .values(
+                    state="FAILED",
+                    task_status=new_task_status,
+                    updated_at=now,
+                    error=new_error,
+                )
             )
+            session.commit()
         case _:
             # Not Normal: Unknown state - Mark as UNKNOWN and log error
             # Try again until we hit deadline
-            conn.execute(
-                """UPDATE exports SET state = 'UNKNOWN', task_status=?, next_check_at=?, updated_at=?, error = ? WHERE id = ?""",
-                (
-                    new_task_status,
-                    next_check_at,
-                    now_iso,
-                    f"Unknown state {new_db_export_state}",
-                    db_task["id"],
-                ),
+            session.execute(
+                update(Export)
+                .where(Export.id == db_task.id)
+                .values(
+                    state="UNKNOWN",
+                    task_status=new_task_status,
+                    next_check_at=next_check_at,
+                    updated_at=now,
+                    error=f"Unknown state {new_db_export_state}",
+                )
             )
+            session.commit()
+    return
 
 
+# ALCHEMY DONE
 def record_file_transfers(
-    conn: sqlite3.Connection,
+    session: Session,
     job_id: str,
     export_tasks: ExportTaskList,
     base_export_path: str | Path,
@@ -853,13 +946,13 @@ def record_file_transfers(
     This allows rollback to the previous file if needed.
 
     Args:
-        conn: sqlite3.Connection
-        job_id: str
-        export_id: str
-        files: list of file paths (str or Path)
-        base_export_path: the base path in storage (str or Path)
+        session (Session): Session object for the database.
+        job_id (str): The ID of the job.
+        export_id (str): The ID of the export.
+        files (list): List of file paths (str or Path).
+        base_export_path (str | Path): The base path in storage.
     """
-    iso_now = db.datetime_to_iso(db.tz_now())
+    now = utils_dates.tz_now()
     base_export_path = Path(base_export_path)
     for task in export_tasks:
         file = Path(task.path, task.name)
@@ -880,23 +973,18 @@ def record_file_transfers(
         active_blob = bucket.blob(active_blob_path)
         if active_blob.exists():
             # set origin and target files as the same
-            conn.execute(
-                """
-                INSERT INTO file_transfers (
-                    job_id, export_id, source_path, destination_path, 
-                    status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    job_id,
-                    export_id,
-                    file.as_posix(),
-                    file.as_posix(),
-                    "NOT_MOVED",
-                    iso_now,
-                    iso_now,
-                ),
+            session.execute(
+                insert(FileTransfer).values(
+                    job_id=job_id,
+                    export_id=export_id,
+                    source_path=file.as_posix(),
+                    destination_path=file.as_posix(),
+                    status="NOT_MOVED",
+                    created_at=now,
+                    updated_at=now,
+                )
             )
+            session.commit()
             continue
 
         # 2. Try today's archive file (file_LUYYYYMMDD.csv)
@@ -913,23 +1001,18 @@ def record_file_transfers(
         archive_blob = bucket.blob(archive_blob_path)
         if archive_blob.exists():
             # Insert mapping into DB
-            conn.execute(
-                """
-                INSERT INTO file_transfers (
-                    job_id, export_id, source_path, destination_path, 
-                    status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    job_id,
-                    export_id,
-                    file.as_posix(),
-                    archive_blob_path,
-                    "MOVED",
-                    iso_now,
-                    iso_now,
-                ),
+            session.execute(
+                insert(FileTransfer).values(
+                    job_id=job_id,
+                    export_id=export_id,
+                    source_path=file.as_posix(),
+                    destination_path=archive_blob_path,
+                    status="MOVED",
+                    created_at=now,
+                    updated_at=now,
+                )
             )
+            session.commit()
             continue
 
         # 3. If not found, list all files in archive dir matching file_LU*.csv and pick newest
@@ -950,29 +1033,26 @@ def record_file_transfers(
             # Pick the one with the newest date
             candidates.sort(reverse=True)
             newest_archived_file = candidates[0]
-            conn.execute(
-                """
-                INSERT INTO file_transfers (
-                    job_id, export_id, source_path, destination_path, 
-                    status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    job_id,
-                    export_id,
-                    file.as_posix(),
-                    newest_archived_file,
-                    "MOVED",
-                    iso_now,
-                    iso_now,
-                ),
+            session.execute(
+                insert(FileTransfer).values(
+                    job_id=job_id,
+                    export_id=export_id,
+                    source_path=file.as_posix(),
+                    destination_path=newest_archived_file,
+                    status="MOVED",
+                    created_at=now,
+                    updated_at=now,
+                )
             )
-    conn.commit()
+            session.commit()
+    session.commit()
+    return
 
 
+# ALCHEMY DONE
 # TODO: Add a rollback or adjustment to manifest
 def rollback_file_transfers(
-    conn: sqlite3.Connection,
+    session: Session,
     job_id: str,
     storage_conn: storage.Client,
     storage_bucket: str,
@@ -981,23 +1061,27 @@ def rollback_file_transfers(
     Rolls back file transfers for a given job by copying files from their destination paths back to their source paths.
 
     args:
-        conn (sqlite3.Connection): Database connection object.
+        session (Session): Database session object.
         job_id (str): ID of the job to roll back.
         storage_conn (storage.Client): Google Cloud Storage client.
         storage_bucket (str): Name of the storage bucket.
     """
     logger.debug(f"Rolling back file transfers for job {job_id}")
-    db_rollback = conn.execute(
-        """
-        SELECT a.id as export_id, b.id as transfer_id, b.source_path, b.destination_path 
-        FROM exports a LEFT 
-        JOIN file_transfers b ON a.id = b.export_id
-        WHERE a.job_id = ? 
-            AND a.state = 'FAILED'
-            AND b.status = 'MOVED'
-        """,
-        (job_id,),
-    ).fetchall()
+    db_rollback = session.execute(
+        select(
+            Export.id.label("export_id"),
+            FileTransfer.id.label("transfer_id"),
+            FileTransfer.source_path,
+            FileTransfer.destination_path,
+        )
+        .select_from(Export)
+        .join(FileTransfer, Export.id == FileTransfer.export_id)
+        .where(
+            Export.job_id == job_id,
+            Export.state == "FAILED",
+            FileTransfer.status == "MOVED",
+        )
+    ).all()
 
     if not db_rollback:
         return
@@ -1005,11 +1089,11 @@ def rollback_file_transfers(
     bucket = storage_conn.bucket(storage_bucket)
 
     for file in db_rollback:
-        original_source = file["source_path"]
-        rollback_source = file["destination_path"]
+        original_source = file.source_path
+        rollback_source = file.destination_path
         if not original_source or not rollback_source:
             logger.warning(
-                f"Skipping rollback for export {file['id']} due to missing paths"
+                f"Skipping rollback for export {file.export_id} due to missing paths"
             )
             continue
         try:
@@ -1020,13 +1104,13 @@ def rollback_file_transfers(
                 continue
             bucket.copy_blob(rollback_blob, bucket, original_source)
             logger.info(f"Rolled back file {original_source} from {rollback_source}")
-            conn.execute(
-                """
-                UPDATE file_transfers 
-                SET status='ROLLED_BACK', updated_at=? WHERE id=?
-                """,
-                (db.datetime_to_iso(db.tz_now()), file["transfer_id"]),
+            session.execute(
+                update(FileTransfer)
+                .where(FileTransfer.id == file.transfer_id)
+                .values(status="ROLLED_BACK", updated_at=utils_dates.tz_now())
             )
+            session.commit()
+
         except Exception as e:
             logger.error(
                 f"Error rolling back file {original_source} from {rollback_source}: {e}"
@@ -1034,8 +1118,9 @@ def rollback_file_transfers(
     return
 
 
+# ALCHEMY DONE
 def auto_image_export(
-    conn: sqlite3.Connection, job_id: str, settings: ImageExportSettings
+    session: Session, job_id: str, settings: ImageExportSettings
 ) -> None:
     """
     Creates and starts Image export tasks, saves them to database and updates job status.
@@ -1043,15 +1128,19 @@ def auto_image_export(
     This function requires a Settings object of type core.config.ImageExportSettings.
 
     Args:
-        conn (sqlite3.Connection): Database connection object.
+        session (Session): Database session object.
         job_id (str): ID of the job to process.
         settings (ImageExportSettings): Settings for the image export process.
     """
     logger.debug(f"Starting image export procedure")
-    job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    job = session.get(Job, job_id)
+
+    if not job:
+        logger.error(f"Job {job_id} not found in database")
+        return
 
     # Only Execute on PENDING, anything else means this already ran
-    if job["image_export_status"] != "PENDING":
+    if job.image_export_status != "PENDING":
         return
 
     # Run Monthly Export Process
@@ -1075,14 +1164,17 @@ def auto_image_export(
     except Exception as e:
         # Mark Job as FAILED if monthly export doesn't complete
         logger.error(f"Error during monthly image export: {e}")
-        error_msg = _join_error_msgs(job["error"], str(e))
-        conn.execute(
-            """UPDATE jobs SET 
-                image_export_status = 'FAILED',
-                error = ?,
-                updated_at = ? WHERE id = ?""",
-            (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
+        error_msg = _join_error_msgs(job.error, str(e))
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(
+                image_export_status="FAILED",
+                error=error_msg,
+                updated_at=utils_dates.tz_now(),
+            )
         )
+        session.commit()
         return
 
     if len(export_tasks) == 0:
@@ -1095,25 +1187,23 @@ def auto_image_export(
         logger.info(f"Generated {len(export_tasks)} image export tasks")
 
     logger.debug(f"Updating image export status to {image_export_status}")
-    conn.execute(
-        """UPDATE jobs SET 
-            image_export_status = ?, 
-            stats_export_status = ?,
-            updated_at = ? WHERE id = ?""",
-        (
-            image_export_status,
-            stats_export_status,
-            db.datetime_to_iso(db.tz_now()),
-            job_id,
-        ),
+    session.execute(
+        update(Job)
+        .where(Job.id == job_id)
+        .values(
+            image_export_status=image_export_status,
+            stats_export_status=stats_export_status,
+            updated_at=utils_dates.tz_now(),
+        )
     )
+    session.commit()
 
     if export_tasks:
         inserted_tasks = 0
         logger.debug(f"Saving {len(export_tasks)} export tasks into database.")
         for task in export_tasks:
             try:
-                add_exportTask_to_db(conn, job_id, task)
+                add_exportTask_to_db(session, job_id, task)
                 inserted_tasks += 1
             except Exception as e:
                 logger.error(f"Error saving task to database - {task.name}: {e}")
@@ -1123,22 +1213,27 @@ def auto_image_export(
 
         if inserted_tasks < len(export_tasks):
             error_msg = _join_error_msgs(
-                job["error"],
+                job.error,
                 f"Failed to insert {len(export_tasks) - inserted_tasks} image tasks in db. Check GGE tasks for any pending tasks",
             )
-            conn.execute(
-                """UPDATE jobs SET 
-                    stats_export_status='FAILED',
-                    error=?, updated_at=? WHERE id=?""",
-                (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    image_export_status="FAILED",
+                    error=error_msg,
+                    updated_at=utils_dates.tz_now(),
+                )
             )
+            session.commit()
 
     # Update Job Status in DB
-    update_job(conn, job_id)
+    update_job(session, job_id)
 
 
+# ALCHEMY DONE
 def auto_stats_export(
-    conn: sqlite3.Connection,
+    session: Session,
     job_id: str,
     settings: StatsExportSettings,
     storage_conn: storage.Client,
@@ -1148,21 +1243,25 @@ def auto_stats_export(
     This function requires a Settings object of type core.config.StatsExportSettings.
 
     Args:
-        conn (sqlite3.Connection): Database connection object.
+        session (Session): Database session object.
         job_id (str): ID of the job to export statistics for.
         settings (StatsExportSettings): Settings for the export process.
         storage_conn (storage.Client): Storage client for accessing Google Cloud Storage.
     """
 
-    now_iso = db.datetime_to_iso(db.tz_now())
-    job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    now = utils_dates.tz_now()
+    job = session.get(Job, job_id)
 
-    job_images = _get_state_of_tasks(conn, job_id, "image")
+    if not job:
+        logger.error(f"Job {job_id} not found in database")
+        return
+
+    job_images = _get_state_of_tasks(session, job_id, "image")
     running_images = [s for s in job_images if s == "RUNNING"]
     completed_images = [s for s in job_images if s == "COMPLETED"]
 
     # Skip if job is not RUNNING or stats exports is not PENDING
-    if job["job_status"] != "RUNNING" or job["stats_export_status"] != "PENDING":
+    if job.job_status != "RUNNING" or job.stats_export_status != "PENDING":
         logger.debug("Skipping stats export - Job not in correct state")
         return
 
@@ -1174,13 +1273,12 @@ def auto_stats_export(
     # skip if no images were exported or all failed
     elif not completed_images:
         logger.debug("Skipping stats export - No images exported or all failed")
-        conn.execute(
-            """UPDATE jobs SET 
-                stats_export_status='COMPLETED', 
-                updated_at=? WHERE id=?""",
-            (now_iso, job_id),
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(stats_export_status="COMPLETED", updated_at=now)
         )
-        conn.commit()
+        session.commit()
         return
     else:
         logger.debug(f"Starting stats export procedure")
@@ -1200,14 +1298,17 @@ def auto_stats_export(
     except Exception as e:
         # Mark Job as FAILED if stats export doesn't complete
         logger.error(f"Error executing stats export process: {e}")
-        error_msg = _join_error_msgs(job["error"], str(e))
-        conn.execute(
-            """UPDATE jobs SET 
-                stats_export_status = 'FAILED', 
-                error = ?,
-                updated_at = ? WHERE id = ?""",
-            (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
+        error_msg = _join_error_msgs(job.error, str(e))
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(
+                stats_export_status="FAILED",
+                error=error_msg,
+                updated_at=utils_dates.tz_now(),
+            )
         )
+        session.commit()
         return
 
     if len(stats_export_tasks) == 0:
@@ -1218,10 +1319,15 @@ def auto_stats_export(
         logger.info(f"Generated {len(stats_export_tasks)} stats export tasks")
 
     logger.debug(f"Updating stats export status to {stats_export_status}")
-    conn.execute(
-        "UPDATE jobs SET stats_export_status = ?, updated_at = ? WHERE id = ?",
-        (stats_export_status, db.datetime_to_iso(db.tz_now()), job_id),
+    session.execute(
+        update(Job)
+        .where(Job.id == job_id)
+        .values(
+            stats_export_status=stats_export_status,
+            updated_at=utils_dates.tz_now(),
+        )
     )
+    session.commit()
 
     if stats_export_tasks:
         #  ----- SAVE TASKS TO DB -----
@@ -1231,7 +1337,7 @@ def auto_stats_export(
         inserted_tasks = 0
         for task in stats_export_tasks:
             try:
-                add_exportTask_to_db(conn, job_id, task)
+                add_exportTask_to_db(session, job_id, task)
                 inserted_tasks += 1
             except Exception as e:
                 logger.error(f"Error saving task to database - {task.name}: {e}")
@@ -1243,7 +1349,7 @@ def auto_stats_export(
         try:
             logger.debug("Recording file transfers for stats exports")
             record_file_transfers(
-                conn=conn,
+                session=session,
                 job_id=job_id,
                 export_tasks=stats_export_tasks,
                 base_export_path=settings.base_export_path,
@@ -1255,29 +1361,35 @@ def auto_stats_export(
 
         if inserted_tasks < len(stats_export_tasks):
             error_msg = _join_error_msgs(
-                job["error"],
+                job.error,
                 f"Failed to insert {len(stats_export_tasks) - inserted_tasks} stats tasks in db.",
             )
-            conn.execute(
-                """UPDATE jobs SET 
-                    stats_export_status='FAILED',
-                    error=?, updated_at=? WHERE id=?""",
-                (error_msg, now_iso, job_id),
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    stats_export_status="FAILED",
+                    error=error_msg,
+                    updated_at=utils_dates.tz_now(),
+                )
             )
+            session.commit()
 
     # Update Job Status in DB
-    update_job(conn, job_id)
+    update_job(session, job_id)
     return
 
 
+# ALCHEMY DONE
 # TODO: Set counter for retries of Job Reporting
-def auto_job_init(settings: Settings) -> str:
+def auto_job_init(settings: Settings, session: Session) -> str:
     """Initialize a new job and creates Image Export Tasks if required.
 
     This function requires a Settings object of type core.config.Settings.
 
     Args:
         settings (Settings): Application settings object.
+        session (Session): Database session object.
 
     Returns:
         str: The ID of the created job.
@@ -1291,11 +1403,10 @@ def auto_job_init(settings: Settings) -> str:
 
     # Create new Job
     try:
-        with db.db(db_path) as conn:
-            # Create a new job
-            job_id = create_job(conn, settings.app.automation.timezone)
-            logger.info(f"Created new job with ID: {job_id}")
-            print(f"Created new job with ID: {job_id}")
+        # Create a new job
+        job_id = create_job(session, settings.app.automation.timezone)
+        logger.info(f"Created new job with ID: {job_id}")
+        print(f"Created new job with ID: {job_id}")
     except Exception as e:
         error_msg = f"Error creating daily job: {e}"
         logger.error(error_msg)
@@ -1312,49 +1423,53 @@ def auto_job_init(settings: Settings) -> str:
     except Exception as e:
         error_msg = f"Error connecting to GEE: {e}"
         logger.error(error_msg)
-        with db.db(db_path) as conn:
-            conn.execute(
-                """UPDATE jobs SET 
-                    job_status = 'FAILED',
-                    image_export_status = 'FAILED',
-                    stats_export_status = 'FAILED',
-                    website_update_status = 'FAILED',
-                    error = ?,
-                    updated_at = ? WHERE id = ?""",
-                (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
-            )
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(
+                job_status="FAILED",
+                image_export_status="FAILED",
+                stats_export_status="FAILED",
+                website_update_status="FAILED",
+                error=error_msg,
+                updated_at=utils_dates.tz_now(),
+            ),
+        )
+        session.commit()
         raise e
 
-    with db.db(db_path) as conn:
-        # Save MODIS status
-        logger.debug("Saving MODIS status info")
-        try:
-            _save_modis_status(conn, job_id)
-        except Exception as e:
-            error_msg = f"Error saving MODIS status: {e}"
-            logger.error(error_msg)
-            conn.execute(
-                """UPDATE jobs SET
-                   error = ?,
-                   updated_at = ? WHERE id = ?""",
-                (error_msg, db.datetime_to_iso(db.tz_now()), job_id),
-            )
+    # Save MODIS status
+    logger.debug("Saving MODIS status info")
+    try:
+        _save_modis_status(session, job_id)
+    except Exception as e:
+        error_msg = f"Error saving MODIS status: {e}"
+        logger.error(error_msg)
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(error=error_msg, updated_at=utils_dates.tz_now())
+        )
+        session.commit()
 
-        # Execute Image Export
-        auto_image_export(conn, job_id, settings.app.image_export)
+    # Execute Image Export
+    # TODO: Add exception handling
+    auto_image_export(session, job_id, settings.app.image_export)
 
-        # Quick polling of Task status (if any were created)
-        logger.debug("Polling any created tasks (20 seconds delay)")
-        time.sleep(20)  # Give GEE time to react
-        due_tasks = _lease_due_tasks(conn)
-        for db_task in due_tasks:
-            update_task_status(conn, db_task)
+    # Quick polling of Task status (if any were created)
+    logger.debug("Polling any created tasks (20 seconds delay)")
+    time.sleep(20)  # Give GEE time to react
+    due_tasks = _lease_due_tasks(session)
+    for db_task in due_tasks:
+        update_task_status(session, db_task)
 
-        return job_id
+    return job_id
 
 
+# ALCHEMY DONE
+# TODO: Move all logic to test if section should run to the actual section function.
 def auto_job_orchestration(
-    conn: sqlite3.Connection,
+    session: Session,
     job_id: int,
     settings: Settings,
     storage_conn: storage.Client | None,
@@ -1363,7 +1478,7 @@ def auto_job_orchestration(
     logger.debug(f"Orchestrating job: {job_id}")
     print(f"Orchestrating job: {job_id}")
 
-    job = conn.execute("SELECT * FROM jobs WHERE id=? LIMIT 1", (job_id,)).fetchone()
+    job = session.get(Job, job_id)
 
     if not job:
         logger.error(f"Job ID {job_id} not found in database")
@@ -1371,20 +1486,22 @@ def auto_job_orchestration(
         return
 
     ########## Update Job Status ##########
-    update_job(conn, job["id"])
-    conn.commit()
+    update_job(session, job.id)
+    session.commit()
 
     # Get updated Job Status
-    job = conn.execute("SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)).fetchone()
+    job = session.get(Job, job_id)
+    if not job:
+        return
 
     ########## Attempt Stats Exports ##########
-    if job["job_status"] == "RUNNING":
-        if job["image_export_status"] in ("RUNNING"):
+    if job.job_status == "RUNNING":
+        if job.image_export_status in ("RUNNING"):
             logger.debug("Image Exports are still running")
             return
 
         # Create Stat Export Tasks (if required)
-        match job["stats_export_status"]:
+        match job.stats_export_status:
             case "PENDING":
 
                 # Early kill, only accepting storage exports for now.
@@ -1393,25 +1510,25 @@ def auto_job_orchestration(
                     return
 
                 auto_stats_export(
-                    conn, job["id"], settings.app.stats_export, storage_conn
+                    session, job.id, settings.app.stats_export, storage_conn
                 )
-                conn.commit()
+                session.commit()
 
-                job = conn.execute(
-                    "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
-                ).fetchone()
+                # Get updated job status
+                job = session.get(Job, job.id)
 
             case "RUNNING":
                 logger.debug("Stats Exports are still running")
                 return
 
             case "COMPLETED" | "FAILED":
-                running_stats_exports = conn.execute(
-                    """SELECT id 
-                    FROM exports 
-                    WHERE job_id=? AND type='table' AND state='RUNNING'""",
-                    (job["id"],),
-                ).fetchall()
+                running_stats_exports = session.scalars(
+                    select(Export).where(
+                        Export.job_id == job.id,
+                        Export.type == "table",
+                        Export.state == "RUNNING",
+                    )
+                ).all()
 
                 if running_stats_exports:
                     logger.debug("Stats Exports are still running")
@@ -1423,14 +1540,14 @@ def auto_job_orchestration(
                     if storage_conn and settings.app.stats_export.storage_bucket:
                         try:
                             rollback_file_transfers(
-                                conn=conn,
-                                job_id=job["id"],
+                                session=session,
+                                job_id=job.id,
                                 storage_conn=storage_conn,
                                 storage_bucket=settings.app.stats_export.storage_bucket,
                             )
-                            conn.commit()
-                            update_job(conn, job["id"])
-                            conn.commit()
+                            session.commit()
+                            update_job(session, job.id)
+                            session.commit()
                             pass
                         except Exception as e:
                             logger.error(f"Error during stats rollback: {e}")
@@ -1444,36 +1561,39 @@ def auto_job_orchestration(
                 return
 
     ########## Website Update ##########
-    if job["job_status"] == "RUNNING" and job["stats_export_status"] in (
+    if not job:
+        return
+    if job.job_status == "RUNNING" and job.stats_export_status in (
         "COMPLETED",
         "FAILED",
     ):
 
-        auto_website_update(conn, job["id"], settings)
-        conn.commit()
-        update_job(conn, job["id"])
-        conn.commit()
-        job = conn.execute(
-            "SELECT * FROM jobs WHERE id=? LIMIT 1", (job["id"],)
-        ).fetchone()
+        auto_website_update(session, job.id, settings)
+        session.commit()
+        update_job(session, job.id)
+        session.commit()
+        job = session.get(Job, job.id)
+    if not job:
+        return
 
     ########## Generate Report ##########
-    if job["job_status"] not in ("COMPLETED", "FAILED") or job["report_status"] not in (
+    if job.job_status not in ("COMPLETED", "FAILED") or job.report_status not in (
         "PENDING"
     ):
         # Something is still pending
         return
     else:
         # Generate Report
-        auto_job_report(conn, job["id"], settings.app.email)
-        conn.commit()
-        update_job(conn, job["id"])
-        conn.commit()
+        auto_job_report(session, job.id, settings.app.email)
+        session.commit()
+        update_job(session, job.id)
+        session.commit()
 
     return
 
 
-def auto_orchestration(settings: Settings) -> None:
+# ALCHEMY DONE
+def auto_orchestration(settings: Settings, session: Session) -> None:
     """
     Orchestrates the lifecycle of Running jobs.
 
@@ -1483,6 +1603,7 @@ def auto_orchestration(settings: Settings) -> None:
 
     Args:
         settings (Settings): Application settings object.
+        session (Session): Database session object.
     """
 
     logger.debug("Starting Job Orchestration")
@@ -1522,31 +1643,33 @@ def auto_orchestration(settings: Settings) -> None:
         print(error_msg)
         return
 
-    with db.db(settings.app.automation.db.db_path) as conn:
-        logger.debug("Initiating Orchestration")
+    logger.debug("Initiating Orchestration")
 
-        #########################################
-        #      Update Export Task Status        #
-        #########################################
-        logger.debug("Updating Export Task Status...")
-        due_tasks = _lease_due_tasks(conn)
-        logger.info(f"Updating status for {len(due_tasks)} leased tasks")
-        print(f"Updating status for {len(due_tasks)} leased tasks")
-        for db_task in due_tasks:
-            update_task_status(conn, db_task)
-            conn.commit()
+    #########################################
+    #      Update Export Task Status        #
+    #########################################
+    logger.debug("Updating Export Task Status...")
+    due_tasks = _lease_due_tasks(session)
+    logger.info(f"Updating status for {len(due_tasks)} leased tasks")
+    print(f"Updating status for {len(due_tasks)} leased tasks")
 
-        #########################################
-        #     Orchestrate pending job steps     #
-        #########################################
-        logger.debug("Orchestrating pending Jobs")
-        jobs = conn.execute(
-            "SELECT id FROM jobs WHERE job_status IN ('RUNNING') or report_status IN ('PENDING')"
-        ).fetchall()
-        logger.info(f"Orchestrating {len(jobs)} pending jobs")
-        print(f"Orchestrating {len(jobs)} pending jobs")
+    for db_task in due_tasks:
+        update_task_status(session, db_task)
+        session.commit()
 
-        for job in jobs:
-            auto_job_orchestration(conn, job["id"], settings, storage_conn)
+    #########################################
+    #     Orchestrate pending job steps     #
+    #########################################
+    logger.debug("Orchestrating pending Jobs")
+    jobs = session.execute(
+        select(Job.id).where(
+            Job.job_status.in_(["RUNNING"]) | Job.report_status.in_(["PENDING"])
+        )
+    ).all()
+    logger.info(f"Orchestrating {len(jobs)} pending jobs")
+    print(f"Orchestrating {len(jobs)} pending jobs")
+
+    for job in jobs:
+        auto_job_orchestration(session, job.id, settings, storage_conn)
 
     return

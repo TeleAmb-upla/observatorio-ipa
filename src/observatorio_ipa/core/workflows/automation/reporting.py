@@ -1,9 +1,14 @@
+import pytz
 import logging
-import sqlite3
+from sqlalchemy import select, insert, update
+from sqlalchemy.orm import Session
 from datetime import datetime
 from observatorio_ipa.core.config import EmailSettings, LOGGER_NAME
 from observatorio_ipa.services.messaging import email
-from observatorio_ipa.utils import db
+import observatorio_ipa.utils.dates
+from observatorio_ipa.core.dbschema import Job, Export, Modis, WebsiteUpdate, Report
+from observatorio_ipa.services.database import db as db_service
+from observatorio_ipa.utils.dates import tz_now
 
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -39,20 +44,24 @@ def _split_dict_by_key(d: dict, key: str, keep_keys: list | None = None) -> dict
     return result
 
 
-def _make_job_report_context(conn: sqlite3.Connection, job_id: str) -> dict:
+def _make_job_report_context(
+    session: Session, job_id: str, tz: str | None = None
+) -> dict:
     """Creates the context for a job report to be used in Jinja template for Report Generation.
 
     Args:
-        conn (sqlite3.Connection): The database connection.
+        session (Session): The database session.
         job_id (str): The ID of the job.
+        tz (str | None): Timezone to convert timestamps to. Defaults to None.
 
     Returns:
         dict: The context for the job report.
     """
     # Get Job
-    job = conn.execute("SELECT * FROM jobs WHERE id = ?;", (job_id,)).fetchone()
+    job = session.get(Job, job_id)
     if job:
-        job_results = {**dict(job)}
+        job_results = {**db_service.model_to_dict(job)}
+
     else:
         return {
             "id": job_id,
@@ -64,30 +73,32 @@ def _make_job_report_context(conn: sqlite3.Connection, job_id: str) -> dict:
         }
 
     # Add Exports
-    export_tasks = conn.execute(
-        "SELECT * FROM exports WHERE job_id=?", (job_id,)
-    ).fetchall()
+    export_tasks = session.scalars(select(Export).where(Export.job_id == job_id)).all()
     if export_tasks:
-        job_results["export_tasks"] = [dict(task) for task in export_tasks]
+        job_results["export_tasks"] = [
+            db_service.model_to_dict(task) for task in export_tasks
+        ]
     else:
         job_results["export_tasks"] = {}
 
     # Add MODIS
-    modis = conn.execute("SELECT * FROM modis WHERE job_id=?", (job_id,)).fetchall()
+    modis = session.scalars(select(Modis).where(Modis.job_id == job_id)).all()
     if modis:
-        job_results["modis"] = [dict(item) for item in modis]
+        job_results["modis"] = [db_service.model_to_dict(item) for item in modis]
     else:
         job_results["modis"] = {}
 
     # Add Website Update info
-    website_update = conn.execute(
-        "SELECT pull_request_id, pull_request_url FROM website_updates WHERE job_id=? ORDER BY created_at DESC LIMIT 1",
-        (job_id,),
-    ).fetchone()
+    website_update = session.execute(
+        select(WebsiteUpdate.pull_request_id, WebsiteUpdate.pull_request_url)
+        .where(WebsiteUpdate.job_id == job_id)
+        .order_by(WebsiteUpdate.created_at.desc())
+        .limit(1)
+    ).first()
     if website_update:
-        job_results["website_update"] = dict(website_update)
+        job_results["website_update"] = website_update._asdict()
 
-    ###### Data Transformations ######
+    ###### Data Arrangement ######
 
     # Convert string to list of errors split by '|'
     if job_results.get("error"):
@@ -96,10 +107,10 @@ def _make_job_report_context(conn: sqlite3.Connection, job_id: str) -> dict:
         ]
 
     # Convert timestamp to readable string
-    if job_results.get("created_at"):
-        job_results["created_at"] = datetime.fromisoformat(
-            job_results["created_at"]
-        ).strftime("%Y-%m-%d %H:%M:%S")
+    if dt := job_results.get("created_at"):
+        if tz:
+            dt = dt.astimezone(pytz.timezone(tz))
+        job_results["created_at"] = dt.strftime("%Y-%m-%d %H:%M:%S")
 
     # Keep only relevant keys of each task
     if all_tasks := job_results.get("export_tasks"):
@@ -155,9 +166,7 @@ def _make_job_report_context(conn: sqlite3.Connection, job_id: str) -> dict:
     return job_results
 
 
-def auto_job_report(
-    conn: sqlite3.Connection, job_id: str, settings: EmailSettings
-) -> None:
+def auto_job_report(session: Session, job_id: str, settings: EmailSettings) -> None:
     """
     Generate Job report for a completed job.
 
@@ -168,13 +177,15 @@ def auto_job_report(
     logger.debug("Starting Report Generation...")
     print("Starting Report Generation...")
 
-    iso_now = db.datetime_to_iso(db.tz_now())
-    job = conn.execute("SELECT * FROM jobs WHERE id=? LIMIT 1", (job_id,)).fetchone()
+    job = session.get(Job, job_id)
+    if not job:
+        logger.error(f"Job {job_id} not found in database.")
+        return
 
     # Report only if Job has finished and reporting is pending
     # fmt: off
-    if (job["job_status"] not in ("COMPLETED", "FAILED") or
-        job["report_status"] not in ("PENDING")):
+    if (job.job_status not in ("COMPLETED", "FAILED") or
+        job.report_status not in ("PENDING")):
         logger.debug("Skipping report generation, job not completed or report not pending.")
         return
     # fmt: on
@@ -183,27 +194,41 @@ def auto_job_report(
     print(f"Generating report for job [{job_id}]...")
 
     # Create new report entry if one doesn't exist
-    report_record = conn.execute(
-        "SELECT * FROM reports WHERE job_id=? LIMIT 1", (job_id,)
-    ).fetchone()
+    report_record = session.scalars(
+        select(Report).where(Report.job_id == job_id)
+    ).first()
 
     if not report_record:
-        conn.execute(
-            "INSERT INTO reports (job_id, status, attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (job_id, "PENDING", 1, iso_now, iso_now),
+        session.execute(
+            insert(Report).values(
+                job_id=job_id,
+                status="PENDING",
+                attempts=1,
+                created_at=tz_now(),
+                updated_at=tz_now(),
+            )
         )
-        report_record = conn.execute(
-            "SELECT * FROM reports WHERE job_id=? LIMIT 1", (job_id,)
-        ).fetchone()
+        session.commit()
+        report_record = session.scalars(
+            select(Report).where(Report.job_id == job_id)
+        ).first()
+        if not report_record:
+            logger.error(f"Could not create report record for job {job_id}")
+            return
 
     else:
-        conn.execute(
-            "UPDATE reports SET attempts=attempts+1, updated_at=? WHERE id=?",
-            (iso_now, report_record["id"]),
+        session.execute(
+            update(Report)
+            .where(Report.id == report_record.id)
+            .values(
+                attempts=report_record.attempts + 1,
+                updated_at=tz_now(),
+            )
         )
+        session.commit()
 
     try:
-        report_context = _make_job_report_context(conn, job_id)
+        report_context = _make_job_report_context(session, job_id)
         if settings.enable_email:
             email_service = email.EmailService(
                 host=settings.host,  # type: ignore
@@ -225,31 +250,35 @@ def auto_job_report(
     except Exception as e:
         error_msg = f"Error generating report for job {job_id}: {e}"
         logger.error(error_msg)
-        conn.execute(
-            """UPDATE reports SET 
-            status='FAILED', last_error=?, updated_at=? 
-            WHERE id=?""",
-            (
-                error_msg,
-                iso_now,
-                report_record["id"],
-            ),
+        session.execute(
+            update(Report)
+            .where(Report.id == report_record.id)
+            .values(
+                status="FAILED",
+                last_error=error_msg,
+                updated_at=tz_now(),
+            )
         )
+        session.commit()
         return
 
     # No Errors, Update report status
-    conn.execute(
-        "UPDATE jobs SET report_status='COMPLETED', updated_at=? WHERE id=?",
-        (
-            iso_now,
-            job_id,
-        ),
+    session.execute(
+        update(Job)
+        .where(Job.id == job_id)
+        .values(
+            report_status="COMPLETED",
+            updated_at=tz_now(),
+        )
     )
-    conn.execute(
-        "UPDATE reports SET status='COMPLETED', updated_at=? WHERE id=?",
-        (
-            iso_now,
-            report_record["id"],
-        ),
+    session.commit()
+    session.execute(
+        update(Report)
+        .where(Report.id == report_record.id)
+        .values(
+            status="COMPLETED",
+            updated_at=tz_now(),
+        )
     )
+    session.commit()
     return

@@ -1,7 +1,8 @@
 import jwt
 import json
 import requests
-import sqlite3
+from sqlalchemy import select, update, insert
+from sqlalchemy.orm import Session
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,8 +10,9 @@ from git import Repo, GitCommandError
 from github import Github, PullRequest
 from google.cloud import storage
 
-from observatorio_ipa.utils import db
 from observatorio_ipa.core.config import Settings, AutoWebsiteSettings, LOGGER_NAME
+from observatorio_ipa.utils.dates import tz_now
+from observatorio_ipa.core.dbschema import Job, Export, WebsiteUpdate
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -224,7 +226,12 @@ def _replace_files_from_gcs(
 
 
 def _commit_and_push(
-    repo: Repo, branch: str, repo_url: str, github_token: str, job_id: str
+    repo: Repo,
+    branch: str,
+    repo_url: str,
+    github_token: str,
+    job_id: str,
+    tz: str | None = None,
 ) -> str | None:
     """
     Commit and push changes to the remote branch.
@@ -235,13 +242,14 @@ def _commit_and_push(
         repo_url (str): HTTPS URL of the remote repository including token.
         github_token (str): GitHub personal access token.
         job_id (str): ID of the job triggering the commit.
+        tz (str | None): Timezone for timestamps (default: None, uses UTC).
 
     Returns:
         str | None: The commit hexsha if changes were committed, else None.
 
     """
     repo.git.add(A=True)
-    commit_msg = f"""Update stats files from GCS ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n
+    commit_msg = f"""Update stats files from GCS ({tz_now(tz).strftime('%Y-%m-%d %H:%M')})\n\n
         Job ID: {job_id}"""
     if repo.is_dirty():
         commit = repo.index.commit(commit_msg)
@@ -293,6 +301,7 @@ def _create_pull_request(
     github_token: str,
     branch: str,
     base_branch: str = "main",
+    tz: str | None = None,
 ) -> PullRequest.PullRequest:
     """
     Create a pull request from the branch to the base branch using PyGithub.
@@ -303,6 +312,7 @@ def _create_pull_request(
         github_token (str): GitHub personal access token.
         branch (str): Source branch for the PR.
         base_branch (str): Target branch for the PR (default: "main").
+        tz (str | None): Timezone for timestamps (default: None, uses UTC).
 
     Returns:
         PullRequest.PullRequest: The created pull request object.
@@ -315,7 +325,7 @@ def _create_pull_request(
     repo_full_name = repo_url.rstrip(".git").split("github.com/")[-1]
     github_repo = Github(github_token)
     repo = github_repo.get_repo(repo_full_name)
-    title = f"Automated stats update {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    title = f"Automated stats update {tz_now(tz).strftime('%Y-%m-%d %H:%M')}"
     body = f"Automated update (replacement) of stats files from GCS. Job ID: {job_id}"
     try:
         pr = repo.create_pull(title=title, body=body, head=branch, base=base_branch)
@@ -337,6 +347,7 @@ def website_update(
     storage_bucket_name: str,
     google_credentials_file: str | Path,
     job_id: str,
+    tz: str | None = None,
 ) -> PullRequest.PullRequest | None:
     """Updates a git repository with files from Google Cloud Storage and creates a pull request.
 
@@ -349,6 +360,7 @@ def website_update(
         storage_bucket_name (str): Name of the Google Cloud Storage bucket.
         google_credentials_file (str | Path): Path to the Google Cloud service account key file.
         job_id (str): ID of the job triggering the update.
+        tz (str | None): Timezone for timestamps (default: None, uses UTC).
 
     Returns:
         PullRequest.PullRequest | None: The created pull request or None if no changes to commit.
@@ -405,6 +417,7 @@ def website_update(
         repo_url=website_settings.github.repo_url,
         github_token=github_token,
         job_id=job_id,
+        tz=tz,
     )
     if not commit_hexsha:
         logger.info("No changes to push, skipping pull request creation.")
@@ -419,49 +432,47 @@ def website_update(
         github_token=github_token,
         branch=website_settings.work_branch,
         base_branch=website_settings.main_branch,
+        tz=tz,
     )
     return pr
 
 
-def auto_website_update(
-    conn: sqlite3.Connection, job_id: str, settings: Settings
-) -> None:
+def auto_website_update(session: Session, job_id: str, settings: Settings) -> None:
     """
     Main process to replace files in a git repository with files from Google Cloud Storage and create a pull request.
 
     This function requires a Settings object of type core.config.Settings.
 
     Args:
-        conn: sqlite3.Connection: SQLite database connection.
+        session (Session): The database session.
         job_id (str): Job ID to filter files in the database.
         settings (Settings): Configuration settings object.
     """
 
     logger.debug("Starting Website Update process...")
     # Check if Job is ready for Website Update
-    job = conn.execute("""SELECT * FROM jobs WHERE id = ? """, (job_id,)).fetchone()
+    job = session.get(Job, job_id)
     if not job:
         logger.warning("Job not found.")
         print("Job not found.")
         return
 
-    if job["job_status"] != "RUNNING":
+    if job.job_status != "RUNNING":
         logger.debug("Job already Finished. Exiting.")
         print("Job already Finished. Exiting.")
         return
 
-    if job["stats_export_status"] not in ("COMPLETED", "FAILED"):
+    if job.stats_export_status not in ("COMPLETED", "FAILED"):
         logger.debug("Stats export not completed. Exiting.")
         print("Stats export not completed. Exiting.")
         return
 
     # verify no running stats exports
-    running_stats_exports = conn.execute(
-        """SELECT id 
-            FROM exports 
-            WHERE job_id=? AND type='table' AND state='RUNNING'""",
-        (job["id"],),
-    ).fetchall()
+    running_stats_exports = session.scalars(
+        select(Export).where(
+            Export.job_id == job.id, Export.type == "table", Export.state == "RUNNING"
+        )
+    ).all()
     if running_stats_exports:
         # Still running, continue to next Job status update
         logger.debug("Stats exports still running. Exiting.")
@@ -470,47 +481,45 @@ def auto_website_update(
 
     # Create Website Update Task if first run
     # Get or Create Website Update Task
-    db_website = conn.execute(
-        "SELECT * FROM website_updates WHERE job_id = ? ",
-        (job_id,),
-    ).fetchone()
+    db_website = session.scalars(
+        select(WebsiteUpdate).where(WebsiteUpdate.job_id == job_id)
+    ).first()
 
     if not db_website:
-        iso_now = db.datetime_to_iso(db.tz_now())
-        conn.execute(
-            """
-            INSERT INTO website_updates (job_id, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (job_id, "PENDING", iso_now, iso_now),
+        now = tz_now()
+        session.execute(
+            insert(WebsiteUpdate).values(
+                job_id=job_id,
+                status="PENDING",
+                created_at=now,
+                updated_at=now,
+            )
         )
+        session.commit()
 
-        db_website = conn.execute(
-            "SELECT * FROM website_updates WHERE job_id = ? ",
-            (job_id,),
-        ).fetchone()
+        db_website = session.scalars(
+            select(WebsiteUpdate).where(WebsiteUpdate.job_id == job_id)
+        ).first()
 
     # Get list of files to replace from DB
-    db_stats_tasks = conn.execute(
-        """
-        SELECT * 
-        FROM exports 
-        WHERE job_id = ? 
-            AND type='table'
-            AND state = 'COMPLETED'
-        """,
-        (job_id,),
-    ).fetchall()
+    db_stats_tasks = session.scalars(
+        select(Export).where(
+            Export.job_id == job_id, Export.type == "table", Export.state == "COMPLETED"
+        )
+    ).all()
 
-    files_to_replace = [Path(row["path"], row["name"]) for row in db_stats_tasks]
+    files_to_replace = [Path(row.path, row.name) for row in db_stats_tasks]
     if not files_to_replace:
         # No Files to replace, finish Website Update Task
-        conn.execute(
-            """UPDATE website_updates 
-            SET status = 'COMPLETED', updated_at = ? 
-            WHERE job_id = ? """,
-            (db.datetime_to_iso(db.tz_now()), job_id),
+        session.execute(
+            update(WebsiteUpdate)
+            .where(WebsiteUpdate.job_id == job_id)
+            .values(
+                status="COMPLETED",
+                updated_at=tz_now(),
+            )
         )
+        session.commit()
         logger.info("No files to replace. Exiting.")
         print("No files to replace. Exiting.")
         return
@@ -522,6 +531,7 @@ def auto_website_update(
             storage_bucket_name=settings.app.stats_export.storage_bucket,  # type: ignore
             google_credentials_file=settings.app.google.credentials_file,
             job_id=job_id,
+            tz=settings.app.automation.timezone,
         )
     except PullRequestAlreadyExistsError:
         # Do Nothing if a PR already exists - Wait for it to clear
@@ -530,31 +540,30 @@ def auto_website_update(
     except Exception as e:
         logger.error(f"Website update process Failed: {e}")
         print(f"Website update process Failed: {e}")
-        conn.execute(
-            """
-            UPDATE website_updates
-            SET attempts = attempts + 1, last_error = ?, 
-            updated_at = ? WHERE job_id = ? """,
-            (str(e), db.datetime_to_iso(db.tz_now()), job_id),
+        session.execute(
+            update(WebsiteUpdate)
+            .where(WebsiteUpdate.job_id == job_id)
+            .values(
+                attempts=WebsiteUpdate.attempts + 1,
+                last_error=str(e),
+                updated_at=tz_now(),
+            )
         )
+        session.commit()
         return
 
     # Update Website Update Task as Completed
-    conn.execute(
-        """
-        UPDATE website_updates
-        SET status = 'COMPLETED', 
-            pull_request_id = ?, 
-            pull_request_url = ? ,
-        updated_at = ? WHERE job_id = ? """,
-        (
-            str(pull_request.id) if pull_request else None,
-            pull_request.html_url if pull_request else None,
-            db.datetime_to_iso(db.tz_now()),
-            job_id,
-        ),
+    session.execute(
+        update(WebsiteUpdate)
+        .where(WebsiteUpdate.job_id == job_id)
+        .values(
+            status="COMPLETED",
+            pull_request_id=str(pull_request.id) if pull_request else None,
+            pull_request_url=pull_request.html_url if pull_request else None,
+            updated_at=tz_now(),
+        )
     )
-
+    session.commit()
     return
 
 

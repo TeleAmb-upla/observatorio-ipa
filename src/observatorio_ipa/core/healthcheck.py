@@ -1,20 +1,19 @@
 # healthcheck.py
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
-import os
 import copy
 from datetime import datetime, timedelta
 import logging
-import sqlite3
+from sqlalchemy import select, text
+from sqlalchemy.orm import sessionmaker
 import json
-import time
 from pathlib import Path
-from observatorio_ipa.utils import db
 from observatorio_ipa.core.config import (
     AutoRunSettings,
-    HEALTHCHECK_HEARTBEAT_FILE,
     LOGGER_NAME,
 )
+from observatorio_ipa.services.database import db as db_service
+from observatorio_ipa.utils.dates import tz_now
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -22,18 +21,25 @@ logger = logging.getLogger(LOGGER_NAME)
 class HealthHandler(BaseHTTPRequestHandler):
     # settings must be set before server starts
     settings: AutoRunSettings
+    SessionMaker: sessionmaker
 
     @classmethod
     def set_settings(cls, settings: AutoRunSettings, *args, **kwargs) -> None:
+
         # settings must be set before server starts
         cls.settings = copy.deepcopy(settings)
+
+        # Create a sessionmaker for DB access
+        db_path = Path(settings.db.db_path).expanduser().resolve()
+        SessionLocal = db_service.build_sessionmaker(db_path.as_posix())
+        cls.SessionMaker = SessionLocal
+
         # create a heartbeat_file if it doesn't exist
         if settings.heartbeat.heartbeat_file:
             hb_file = Path(settings.heartbeat.heartbeat_file)
             if not hb_file.exists():
                 hb_file.parent.mkdir(parents=True, exist_ok=True)
-                tz = settings.timezone or "UTC"
-                hb_file.write_text(db.datetime_to_iso(db.tz_now(tz=tz)))
+                hb_file.write_text(tz_now(tz="UTC").isoformat(), encoding="utf-8")
 
     def do_GET(self):
         if self.path == "/healthz":
@@ -50,15 +56,15 @@ class HealthHandler(BaseHTTPRequestHandler):
     def check_health(self):
         settings = self.settings
         db_path = Path(settings.db.db_path).expanduser().resolve()
-        now = db.tz_now()
+        now = tz_now()
         poll_minutes = settings.orchestration_job.interval_minutes
         poll_sec = poll_minutes * 60
         result = {"healthy": True, "checks": {}}
 
         # DB connectivity
         try:
-            with db.db(db_path) as conn:
-                conn.execute("SELECT 1")
+            with self.SessionMaker() as session:
+                db_result = session.execute(text("SELECT 1 as test")).first()
             result["checks"]["db"] = True
         except Exception as e:
             result["checks"]["db"] = False
@@ -69,27 +75,26 @@ class HealthHandler(BaseHTTPRequestHandler):
         # Export task staleness
         # Disabled for now. Creating error when poll has been offline for valid reasons.
         # try:
-        #     with db.db(db_path) as conn:
-        #         row = conn.execute(
-        #             """
-        #             SELECT MIN(next_check_at) AS min_next
-        #             FROM exports
-        #             WHERE state IN ('RUNNING')
-        #         """
-        #         ).fetchone()
-        #         staleness = 0
-        #         if row and row["min_next"]:
-        #             min_next = datetime.fromisoformat(row["min_next"])
-        #             staleness = max(0, int((now - min_next).total_seconds()))
+        # row = session.execute(
+        #     """
+        #     SELECT MIN(next_check_at) AS min_next
+        #     FROM exports
+        #     WHERE state IN ('RUNNING')
+        # """
+        # ).fetchone()
+        # staleness = 0
+        # if row and row["min_next"]:
+        #     min_next = datetime.fromisoformat(row["min_next"])
+        #     staleness = max(0, int((now - min_next).total_seconds()))
 
-        #         if staleness > poll_sec * 3:
-        #             result["checks"]["stale_exports"] = False
-        #             result["healthy"] = False
-        #             logger.error(
-        #                 f"Healthcheck failed: export tasks stale by {staleness}s (> {poll_sec * 3}s)"
-        #             )
-        #         else:
-        #             result["checks"]["stale_exports"] = True
+        # if staleness > poll_sec * 3:
+        #     result["checks"]["stale_exports"] = False
+        #     result["healthy"] = False
+        #     logger.error(
+        #         f"Healthcheck failed: export tasks stale by {staleness}s (> {poll_sec * 3}s)"
+        #     )
+        # else:
+        #     result["checks"]["stale_exports"] = True
         # except Exception as e:
         #     result["checks"]["stale_exports"] = False
         #     result["healthy"] = False
@@ -125,7 +130,7 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 
 def start_healthcheck_server(settings: AutoRunSettings, port: int = 8080) -> HTTPServer:
-    HealthHandler.set_settings(settings)
+    HealthHandler.set_settings(settings, sessionmaker=sessionmaker)
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

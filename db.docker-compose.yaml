@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:17.6-trixie
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: '1G'
+    environment:
+      POSTGRES_USER_FILE: /run/secrets/db_admin_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_admin_passwd
+      POSTGRES_DB: observatorio_ipa
+
+    # TODO:  Enable Host Authentication (POSTGRES_HOST_AUTH_METHOD)
+
+    ports:
+      - "5432:5432" # Enable external port only for testing
+
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    
+    secrets:
+      - db_admin_user
+      - db_admin_passwd
+      
+    networks:
+      - osn_auto
+
+volumes:
+  db_data:
+   name: observatorio_ipa_db
+   external: true
+
+secrets:
+  db_admin_user:
+    file: ./secrets/db_admin_user.txt
+  db_admin_passwd:
+    file: ./secrets/db_admin_passwd.txt
+
+networks:
+    osn_auto:
+      name: osn_auto
+      external: true
+     

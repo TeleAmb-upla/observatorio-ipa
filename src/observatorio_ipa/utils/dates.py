@@ -1,8 +1,9 @@
-from datetime import date, datetime, timedelta
-from dateutil.relativedelta import relativedelta
-import logging
+import os
 import re
 import pytz
+import logging
+from datetime import date, datetime, timedelta
+from dateutil.relativedelta import relativedelta
 
 UTC_TZ = pytz.timezone("UTC")
 
@@ -402,3 +403,38 @@ def ms_to_datetime(ms: int) -> datetime:
         datetime: Datetime object.
     """
     return datetime.fromtimestamp(timestamp=(ms / 1000), tz=UTC_TZ)
+
+
+def tz_now(tz: str | None = None) -> datetime:
+    """Get the current datetime. If no timezone is provided, use UTC.
+
+    Timezone can be provided by argument tz or by the 'TZ' environment variable.
+    """
+    if not tz:
+        tz = os.getenv("TZ", "UTC")
+    return datetime.now(tz=pytz.timezone(tz))
+
+
+def datetime_to_iso(dt: datetime) -> str:
+    """Convert a datetime object to an ISO 8601 formatted string."""
+    return dt.isoformat()
+
+
+def now_plus(seconds: int) -> datetime:
+    """Get the current time plus a number of seconds"""
+    return tz_now() + timedelta(seconds=seconds)
+
+
+def now_iso_plus(seconds: int) -> str:
+    """Returns the current time plus a number of seconds as an ISO 8601 formatted string."""
+    return datetime_to_iso(now_plus(seconds))
+
+
+def dt_plus(dt: datetime, seconds: int) -> datetime:
+    """Get a datetime object plus a number of seconds"""
+    return dt + timedelta(seconds=seconds)
+
+
+def dt_iso_plus(dt: datetime, seconds: int) -> str:
+    """Get a datetime object plus a number of seconds as an ISO 8601 formatted string."""
+    return datetime_to_iso(dt_plus(dt, seconds))

@@ -27,6 +27,8 @@ TXT_REPORT_TEMPLATE = "job_template.txt"
 HTML_REPORT_TEMPLATE = "job_template.html"
 HEALTHCHECK_HEARTBEAT_FILE = "/var/lib/observatorio_ipa/healthcheck_heartbeat.txt"
 HEALTHCHECK_PORT = 8080
+DEFAULT_DB_NAME = "observatorio_ipa.db"
+DEFAULT_DB_PATH = Path(__file__).parent
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -118,7 +120,6 @@ class EmailSettings(BaseSettings):
     user: str | None = Field(
         validate_default=True,
         default_factory=lambda data: value_from_file(data["user_file"]),
-        min_length=1,
         description="SMTP user, can be read from a file",
     )
 
@@ -131,7 +132,6 @@ class EmailSettings(BaseSettings):
         default_factory=lambda data: SecretStr(
             value_from_file(data["password_file"]) or ""
         ),
-        min_length=1,
         description="SMTP password. Can also be read from a file with 'password_file' option",
     )
     from_address: Annotated[
@@ -351,7 +351,52 @@ class AutoDBSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
     )
-    db_path: Path
+    type: Literal["sqlite", "postgresql"] = "sqlite"
+    db_path: Path | None = None
+    db_name: str = DEFAULT_DB_NAME
+    host: str | None = None
+    port: int = 5432  # Default PostgreSQL port
+    user_file: FilePath | None = None
+    user: str | None = Field(
+        validate_default=True,
+        default_factory=lambda data: value_from_file(data["user_file"]),
+        description="db user, can be read from a file",
+    )
+
+    password_file: FilePath | None = None
+    password: SecretStr | None = Field(
+        validate_default=True,
+        default_factory=lambda data: SecretStr(
+            value_from_file(data["password_file"]) or ""
+        ),
+        description="db password. Can also be read from a file with 'password_file' option",
+    )
+
+    @model_validator(mode="after")
+    def check_required_fields(self):
+        if self.type == "sqlite":
+            if self.db_path is None:
+                raise ValueError("db_path must be set when type is 'sqlite'")
+            # If db_path points to a file (has stem and suffix), raise error
+            if self.db_path is not None and self.db_path.suffix:
+                raise ValueError(
+                    "For sqlite, db_path should be a directory. Use db_name for the database file name."
+                )
+        elif self.type == "postgresql":
+            missing = []
+            if self.host is None:
+                missing.append("host")
+            if self.port is None:
+                missing.append("port")
+            if self.user is None:
+                missing.append("user")
+            if not self.password:
+                missing.append("password")
+            if missing:
+                raise ValueError(
+                    f"When type is 'postgresql', the following fields must be set: {', '.join(missing)}"
+                )
+        return self
 
 
 class AutoDailyJobSettings(BaseSettings):

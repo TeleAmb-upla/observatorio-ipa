@@ -1,8 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-DEFAULT_DB_PATH = Path(__file__).parent
-DEFAULT_DB_NAME = "observatorio_ipa.db"
+from observatorio_ipa.core.config import DEFAULT_DB_NAME, DEFAULT_DB_PATH
 
 DDL = """
 PRAGMA journal_mode=WAL;
