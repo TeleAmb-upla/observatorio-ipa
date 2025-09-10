@@ -53,7 +53,6 @@ class HealthHandler(BaseHTTPRequestHandler):
 
     def check_health(self):
         settings = self.settings
-        db_path = Path(settings.db.db_path).expanduser().resolve()
         now = tz_now()
         poll_minutes = settings.orchestration_job.interval_minutes
         poll_sec = poll_minutes * 60

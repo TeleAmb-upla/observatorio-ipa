@@ -25,7 +25,7 @@ services:
       - db_admin_passwd
       
     networks:
-      - osn_auto
+      - osn_ipa
 
 volumes:
   db_data:
@@ -39,7 +39,7 @@ secrets:
     file: ./secrets/db_admin_passwd.txt
 
 networks:
-    osn_auto:
-      name: osn_auto
+    osn_ipa:
+      name: osn_ipa
       external: true
      
