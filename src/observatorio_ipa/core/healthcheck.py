@@ -30,9 +30,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         cls.settings = copy.deepcopy(settings)
 
         # Create a sessionmaker for DB access
-        db_path = Path(settings.db.db_path).expanduser().resolve()
-        SessionLocal = db_service.build_sessionmaker(db_path.as_posix())
-        cls.SessionMaker = SessionLocal
+        cls.SessionMaker = db_service.build_sessionmaker(settings.db)
 
         # create a heartbeat_file if it doesn't exist
         if settings.heartbeat.heartbeat_file:
