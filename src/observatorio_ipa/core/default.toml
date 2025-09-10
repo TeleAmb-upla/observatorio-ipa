@@ -117,7 +117,16 @@ skip_manifest = false
 timezone = "UTC"
 
 [app.automation.db]
-db_path = "/var/lib/observatorio_ipa/observatorio_ipa.db"
+type = "sqlite"                           # sqlite or postgresql
+db_path = "/var/lib/observatorio_ipa/db/"
+db_name = "observatorio_ipa.db"
+# host = "localhost"
+# port = 5432
+# user_file = "/run/secrets/db_user.txt"
+# user = "observatorio_ipa_user" # Prefer using user_file instead of user
+# password_file = "/run/secrets/db_password.txt"
+# password = "your_password" # Prefer using password_file instead of password
+
 
 [app.automation.daily_job]
 cron = "0 20 * * *"
