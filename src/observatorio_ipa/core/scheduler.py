@@ -156,8 +156,11 @@ def main():
 
     # --- Create job scheduling
     job_cron = runtime_settings.app.automation.daily_job.cron
+    logger.debug(f"Job creation cron from config: '{job_cron}'")
     if job_cron:
+        logger.debug(f"Scheduling Job creation with cron: '{job_cron}'")
         cron_trigger = parse_cron_expr(job_cron)
+        print(cron_trigger)
     else:
         raise SystemExit("Config error: cron for Job execution must be set.")
     sched.add_job(
