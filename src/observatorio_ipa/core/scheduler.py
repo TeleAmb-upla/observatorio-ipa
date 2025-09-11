@@ -120,7 +120,7 @@ def main():
     if tz_str:
         try:
             _ = ZoneInfo(tz_str)
-            # os.environ["TZ"] = tz_str # Not used anymore, we'll keep all in UTC
+            logger.info(f"Using timezone: {tz_str}")
         except Exception as e:
             raise SystemExit(f"Config error: invalid timezone '{tz_str}': {e}")
 
@@ -158,9 +158,8 @@ def main():
     job_cron = runtime_settings.app.automation.daily_job.cron
     logger.debug(f"Job creation cron from config: '{job_cron}'")
     if job_cron:
-        logger.debug(f"Scheduling Job creation with cron: '{job_cron}'")
         cron_trigger = parse_cron_expr(job_cron)
-        print(cron_trigger)
+        logger.debug(f"Scheduling Job creation with cron: '{job_cron}'")
     else:
         raise SystemExit("Config error: cron for Job execution must be set.")
     sched.add_job(
