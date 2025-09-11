@@ -411,7 +411,8 @@ def tz_now(tz: str | None = None) -> datetime:
     Timezone can be provided by argument tz or by the 'TZ' environment variable.
     """
     if not tz:
-        tz = os.getenv("TZ", "UTC")
+        tz = "UTC"
+        # tz = os.getenv("TZ", "UTC")
     return datetime.now(tz=pytz.timezone(tz))
 
 

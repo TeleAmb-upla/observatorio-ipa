@@ -83,6 +83,10 @@ def init_logging_config(
     # print(new_logger.handlers)
 
     # File handler
+    # -- Create logs directory if not exists
+    log_file_path = config.file.parent
+    log_file_path.mkdir(parents=True, exist_ok=True)
+    # -- Create file handler
     fh = logging.FileHandler(filename=config.file.as_posix(), encoding=config.encoding)
     fh.setLevel(config.level)
     fh.setFormatter(formatter)

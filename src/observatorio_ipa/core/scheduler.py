@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from observatorio_ipa.core.healthcheck import start_healthcheck_server
@@ -120,6 +119,7 @@ def main():
     if tz_str:
         try:
             _ = ZoneInfo(tz_str)
+            os.environ["TZ"] = tz_str
             logger.info(f"Using timezone: {tz_str}")
         except Exception as e:
             raise SystemExit(f"Config error: invalid timezone '{tz_str}': {e}")
@@ -153,10 +153,10 @@ def main():
     # Create Scheduler
 
     sched = BlockingScheduler(timezone=tz_str, logger=logger)
+    logger.debug(f"Scheduler created with timezone: {sched.timezone}")
 
     # --- Create job scheduling
     job_cron = runtime_settings.app.automation.daily_job.cron
-    logger.debug(f"Job creation cron from config: '{job_cron}'")
     if job_cron:
         cron_trigger = parse_cron_expr(job_cron)
         logger.debug(f"Scheduling Job creation with cron: '{job_cron}'")
@@ -186,6 +186,13 @@ def main():
         coalesce=True,  # if we fall behind, run once (not catch up N times)
         misfire_grace_time=60,  # seconds grace to run if missed (e.g., restart)
     )
+
+    # Debug: log next run times for all jobs
+    for job in sched.get_jobs():
+        logger.debug(
+            str(job)
+            # f"Job '{job.id}' next run time: {job} (timezone: {sched.timezone})"
+        )
 
     # graceful shutdown on SIGTERM/SIGINT
     def shutdown(signum, frame):
