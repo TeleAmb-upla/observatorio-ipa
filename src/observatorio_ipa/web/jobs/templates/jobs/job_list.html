@@ -1,0 +1,29 @@
+{% extends "_base.html" %}
+{% load render_table from django_tables2 %}
+
+{% block title %}Job List{% endblock title %}
+
+{% block content %}
+  <h2>Jobs</h2>
+  <section class="mb-3 p-3 rounded bg-light">
+    <div class="col-md-4 mb-3">
+      <form method="get" class="mb-3 d-flex" autocomplete="off">
+        <div class="input-group flex-nowrap">
+          <input type="text" name="job_search" class="form-control" placeholder="Search Job by ID" value="{{ job_search_query }}">
+          <button class="btn btn-primary" type="submit">Search</button>
+          {% if job_search_query %}
+            <a href="?" class="btn btn-outline-secondary">Clear</a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+    {% render_table table %}
+    {% if table.rows|length == 0 %}
+      {% if job_search_query %}
+        <div class="alert alert-warning">Job not found.</div>
+      {% else %}
+        <div class="alert alert-info">No jobs available.</div>
+      {% endif %}
+    {% endif %}
+  </section>
+{% endblock content %}

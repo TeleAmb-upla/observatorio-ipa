@@ -1,0 +1,33 @@
+{% extends "_base.html" %}
+{% block title %}Search Results{% endblock title %}
+{% block content %}
+  <h1>Search Results</h1>
+  {% if results %}
+    <table class="table table-bordered">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>ID</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for obj in results %}
+        <tr>
+          <td>{{ obj.type }}</td>
+          <td>{{ obj.id }}</td>
+          <td>
+            {% if obj.type == "Job" %}
+              <a href="{% url 'job_detail' obj.id %}">View Job</a>
+            {% elif obj.type == "Export" %}
+              <a href="{% url 'export_detail' obj.id %}">View Export</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="alert alert-info">No results found.</div>
+  {% endif %}
+{% endblock content %}

@@ -544,6 +544,27 @@ class Settings(BaseSettings):
     #     env_file = ".env"
 
 
+class DjangoSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+    secret_key_file: FilePath
+    debug: bool = False
+    # allowed_hosts: list[str] = Field(default_factory=list)
+    # database_url: str
+    # static_root: Path = Path("staticfiles")
+    # static_url: str = "/static/"
+    # media_root: Path = Path("media")
+    # media_url: str = "/media/"
+
+
+class WebSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+    django: DjangoSettings
+
+
 def _deep_merge_dicts(a: dict, b: Mapping) -> dict:
     """Recursively merge dict b into dict a (b has precedence)."""
     result = copy.deepcopy(a)

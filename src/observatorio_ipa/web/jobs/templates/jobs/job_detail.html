@@ -1,0 +1,146 @@
+{% extends "_base.html" %}
+{% load render_table from django_tables2 %}
+{% block title %}Job Details{% endblock title %}
+{% block content %}
+<section id="breadcrumb-section" class="mb-3">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item">
+        <a class="fw-semibold text-decoration-none" ref="{% url 'home' %}"><i class="bi bi-house-door-fill"></i> Home</a>
+      </li>
+      <li class="breadcrumb-item"><a class="fw-semibold text-decoration-none" href="{% url 'job_list' %}">Job List</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Job</li>
+    </ol>
+  </nav>
+</section>
+  <section id="job-details" class="p-3 rounded">
+    <h3 class="h3">Job ID: <small class="text-body-secondary">{{ job.id }}
+    {% if job.job_status == "COMPLETED" %}
+    <span class="badge rounded-pill bg-success">{{ job.job_status }}</span>
+    {% elif job.job_status == "FAILED" %}
+    <span class="badge rounded-pill bg-danger">{{ job.job_status }}</span>
+    {% else %}
+    <span class="badge rounded-pill bg-secondary">{{ job.job_status }}</span>
+    {% endif %}
+    </small>
+  </h3>
+    <hr>
+    <div class="row mb-2">
+      <div class="col-md-4">
+        <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div class="data-field-label flex-shrink-0">Image Export Status:</div>
+          <div class="data-field-value flex-grow-1">{{ job.image_export_status }}</div>
+        </div>
+        <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div class="data-field-label flex-shrink-0">Stats Export Status:</div>
+          <div class="data-field-value flex-grow-1">{{ job.stats_export_status }}</div>
+        </div>
+        <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div class="data-field-label flex-shrink-0">Website Update Status:</div>
+          <div class="data-field-value flex-grow-1">{{ job.website_update_status }}</div>
+        </div>
+        <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div class="data-field-label flex-shrink-0">Report Status:</div>
+          <div class="data-field-value flex-grow-1">{{ job.report_status }}</div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div class="data-field-label-s flex-shrink-0">Created at:</div>
+          <div class="data-field-value flex-grow-1">{{ job.created_at }}</div>
+        </div>
+        <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div class="data-field-label-s flex-shrink-0">Updated at:</div>
+          <div class="data-field-value flex-grow-1">{{ job.updated_at }}</div>
+        </div>
+        <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div class="data-field-label-s flex-shrink-0">Timezone:</div>
+          <div class="data-field-value flex-grow-1">{{ job.timezone }}</div>
+      </div>
+  
+      </div>
+    </div>
+    {% if job.error %}
+      <div class="w-100">
+        <strong>Error(s):</strong>
+        <div>
+          <ul>
+          {% for error in error_list %}
+            <li>{{ error }}</li>
+          {% endfor %}
+          </ul>
+        </div>
+      </div>
+    {% endif %}
+    {% if job.website_update_status == "PENDING" or job.website_update_status == "FAILED" %}
+      {% if job.website_updates and job.website_updates.last_error %}
+      <div class="w-100 mb-2">
+            <strong>Website Update Error:</strong>
+            <div>
+              <p>{{ job.website_updates.last_error }}</p>
+            </div>
+          </div>
+          {% endif %}
+        {% endif %}
+        {% if job.report_status == "FAILED" or job.report_status == "PENDING" %} 
+          {% if job.reports and job.reports.last_error %}
+          <div class="w-100 mb-2">
+            <strong>Report Error:</strong>
+            <div>
+              <p>{{ job.reports.last_error }}</p>
+            </div>
+          </div>
+          {% endif %}
+        {% endif %}
+  </section>
+    
+  <section id="related-exports" class="mb-3 p-3 rounded bg-light">
+    <h4>Related Exports</h4>
+    <div class="col-md-4 mb-3">
+      <form method="get" class="mb-3 d-flex" autocomplete="off">
+        <div class="input-group flex-nowrap">
+          <input type="text" name="export_search" class="form-control" placeholder="Search Export by ID or Name" value="{{ export_search_query }}">
+          <button class="btn btn-primary" type="submit">Search</button>
+          {% if export_search_query %}
+            <a href="?" class="btn btn-outline-secondary">Clear</a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+    {% render_table exports_table %}
+    {% if exports_table.rows|length == 0 %}
+      {% if export_search_query %}
+        <div class="alert alert-warning">Export not found.</div>
+      {% else %}
+      <div class="alert alert-info">No exports related to this job.</div>
+      {% endif %}
+      
+    {% endif %}
+  </section>
+    
+  <section id="modis-information" class="mb-3 p-3 rounded bg-light">
+    <h4>MODIS Status</h4>
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Collection</th>
+          <th>Images</th>
+          <th>Last Image</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for modis in job.modis_entries.all %}
+        <tr>
+          <td>{{ modis.get_name_display }}</td>
+          <td>{{ modis.collection }}</td>
+          <td>{{ modis.images }}</td>
+          <td>{{ modis.last_image }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4">No Modis information found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock content %}

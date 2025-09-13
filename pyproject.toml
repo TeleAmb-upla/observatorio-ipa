@@ -75,9 +75,12 @@ dev = [
 
 [project.optional-dependencies]
 web = [
+    "crispy-bootstrap5>=2025.6",
     "django>=5.2,<6.0",
     "django-allauth>=65.11.2",
     "django-crispy-forms>=2.4",
+    "django-filter>=25.1",
+    "django-tables2>=2.7.5",
 ]
 
 [tool.uv]
