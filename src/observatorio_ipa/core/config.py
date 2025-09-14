@@ -551,6 +551,7 @@ class DjangoSettings(BaseSettings):
     secret_key_file: FilePath
     debug: bool = False
     allowed_hosts: list[str] = Field(default_factory=list)
+    csrf_trusted_origins: list[str] = Field(default_factory=list)
 
     # database_url: str
     # static_root: Path = Path("staticfiles")

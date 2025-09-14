@@ -241,3 +241,6 @@ LOGGING = {
         },
     },
 }
+
+
+CSRF_TRUSTED_ORIGINS = [] + runtime_web_settings.django.csrf_trusted_origins
