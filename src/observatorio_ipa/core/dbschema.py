@@ -26,7 +26,7 @@ class Base(DeclarativeBase):
 
 class Job(Base):
     __tablename__ = "jobs"
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     job_status: Mapped[str] = mapped_column(String, nullable=False)
     image_export_status: Mapped[str] = mapped_column(
         String, nullable=False, default="PENDING"
@@ -68,9 +68,9 @@ class Job(Base):
 # Export Status: RUNNING, COMPLETED, FAILED, TIMED_OUT
 class Export(Base):
     __tablename__ = "exports"
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
     job_id: Mapped[str] = mapped_column(
-        String, ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+        String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
     )
     state: Mapped[str] = mapped_column(String, nullable=False)
     type: Mapped[str] = mapped_column(String, nullable=False)
