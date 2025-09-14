@@ -550,7 +550,8 @@ class DjangoSettings(BaseSettings):
     )
     secret_key_file: FilePath
     debug: bool = False
-    # allowed_hosts: list[str] = Field(default_factory=list)
+    allowed_hosts: list[str] = Field(default_factory=list)
+
     # database_url: str
     # static_root: Path = Path("staticfiles")
     # static_url: str = "/static/"
@@ -563,6 +564,12 @@ class WebSettings(BaseSettings):
         extra="ignore",
     )
     django: DjangoSettings
+    ipa_db: AutoDBSettings
+    default_db: AutoDBSettings = AutoDBSettings(
+        type="sqlite",
+        db_path=DEFAULT_DB_PATH,
+        db_name="observatorio_ipa_web.db",
+    )
 
 
 def _deep_merge_dicts(a: dict, b: Mapping) -> dict:
@@ -585,34 +592,3 @@ def load_settings_from_toml(toml_path: str | Path) -> "Settings":
         user_data = tomllib.load(f)
     merged_data = _deep_merge_dicts(default_data, user_data)
     return Settings(**merged_data)  # Return the merged settings
-
-
-# settings = Settings()
-# if __name__ == "__main__":
-#     os.environ["IPA_ENV_FILE"] = "configs/test.env"
-
-#     settings_dict = {}
-#     smtp_settings_dict = {}
-#     log_settings_dict = {}
-#     try:
-#         runtime_settings: Settings = Settings(
-#             _env_file=os.getenv("IPA_ENV_FILE", DEFAULT_ENV_FILE), **settings_dict  # type: ignore
-#         )
-#         if runtime_settings.enable_email:
-#             smtp_settings: EmailSettings | None = EmailSettings(
-#                 _env_file=os.getenv("IPA_ENV_FILE", DEFAULT_ENV_FILE),  # type: ignore
-#                 **smtp_settings_dict,
-#             )
-#         else:
-#             smtp_settings = None
-#         log_settings: LogSettings = LogSettings(
-#             _env_file=os.getenv("IPA_ENV_FILE", DEFAULT_ENV_FILE), **log_settings_dict  # type: ignore
-#         )
-#     except ValidationError as e:
-#         print("Validation error:", e)
-#         exit(1)
-#     print(runtime_settings.model_dump())
-#     if smtp_settings:
-#         print(smtp_settings.model_dump())
-#         print(f"Super Secret Password: {smtp_settings.password.get_secret_value()}")
-#     print(log_settings.model_dump())

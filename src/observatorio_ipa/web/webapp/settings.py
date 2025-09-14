@@ -10,7 +10,14 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+from observatorio_ipa.web.config import web_settings_init, db_settings_as_dict
+
+
+# Web application settings
+runtime_web_settings = web_settings_init()
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +27,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-0jd-=a_5n_08cd^d$ppr$5rd@7$=*nu1em0&uw%(j4(43ows80"
+SECRET_KEY = runtime_web_settings.django.secret_key_file.read_text().strip()
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = runtime_web_settings.django.debug
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [] + runtime_web_settings.django.allowed_hosts
 
 
 # Application definition
@@ -36,6 +43,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
+    "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
     "allauth",
     "allauth.account",
@@ -50,6 +58,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "debug_toolbar.middleware.DebugToolbarMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -84,19 +93,25 @@ WSGI_APPLICATION = "webapp.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+default_db_settings = db_settings_as_dict(runtime_web_settings.default_db)
+ipa_db_settings = db_settings_as_dict(runtime_web_settings.ipa_db)
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": default_db_settings["engine"],
+        "NAME": default_db_settings["name"],
+        "USER": default_db_settings["user"] or "",
+        "PASSWORD": default_db_settings["password"] or "",
+        "HOST": default_db_settings["host"] or "",
+        "PORT": default_db_settings["port"] or "",
     },
     "ipa": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": "observatorio_ipa",
-        "USER": "osn-admin-1",
-        "PASSWORD": "Fanatic-Sterile-Defraud1",
-        "HOST": "localhost",
-        "PORT": "5432",
+        "ENGINE": ipa_db_settings["engine"],
+        "NAME": ipa_db_settings["name"],
+        "USER": ipa_db_settings["user"] or "",
+        "PASSWORD": ipa_db_settings["password"] or "",
+        "HOST": ipa_db_settings["host"] or "",
+        "PORT": ipa_db_settings["port"] or "",
     },
 }
 
@@ -181,3 +196,48 @@ CRISPY_TEMPLATE_PACK = "bootstrap5"
 
 # Django Tables2 Configuration
 DJANGO_TABLES2_TEMPLATE = "django_tables2/bootstrap5.html"
+
+
+# whitenoise configuration
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    }
+}
+
+# --- Logging configuration for production debugging ---
+
+LOG_DIR = os.environ.get("DJANGO_LOG_DIR", BASE_DIR / "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"},
+        "simple": {"format": "%(levelname)s %(message)s"},
+    },
+    "handlers": {
+        "file": {
+            "level": "WARNING",
+            "class": "logging.FileHandler",
+            "filename": str(LOG_DIR) + "/django.log",
+            "formatter": "verbose",
+        },
+        "console": {
+            "level": "INFO",
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+    },
+    "root": {
+        "handlers": ["file", "console"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["file", "console"],
+            "level": "WARNING",
+            "propagate": True,
+        },
+    },
+}

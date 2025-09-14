@@ -17,7 +17,7 @@ class RunningJobsListView(LoginRequiredMixin, SingleTableMixin, ListView):
     paginate_by = 10
 
     def get_queryset(self):
-        queryset = Job.objects.filter(job_status="RUNNING")
+        queryset = Job.objects.filter(job_status="RUNNING").order_by("-created_at")
         search_query = self.request.GET.get("running_job_search", "").strip()
         if search_query:
             queryset = queryset.filter(Q(id__icontains=search_query))
@@ -38,7 +38,7 @@ class JobListView(LoginRequiredMixin, SingleTableMixin, ListView):
     paginate_by = 10
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().order_by("-created_at")
         search_query = self.request.GET.get("job_search", "").strip()
         if search_query:
             queryset = queryset.filter(Q(id__icontains=search_query))
