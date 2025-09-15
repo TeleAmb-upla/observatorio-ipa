@@ -6,14 +6,14 @@
   <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
       <li class="breadcrumb-item">
-        <a class="fw-semibold text-decoration-none" ref="{% url 'home' %}"><i class="bi bi-house-door-fill"></i> Home</a>
+        <a class="fw-semibold text-decoration-none" href="{% url 'home' %}"><i class="bi bi-house-door-fill"></i> Home</a>
       </li>
       <li class="breadcrumb-item"><a class="fw-semibold text-decoration-none" href="{% url 'job_list' %}">Job List</a></li>
       <li class="breadcrumb-item active" aria-current="page">Job</li>
     </ol>
   </nav>
 </section>
-  <section id="job-details" class="p-3 rounded">
+  <section id="job-details" class="container-md p-3 rounded">
     <h3 class="h3">Job ID: <small class="text-body-secondary">{{ job.id }}
     {% if job.job_status == "COMPLETED" %}
     <span class="badge rounded-pill bg-success">{{ job.job_status }}</span>
@@ -120,27 +120,29 @@
     
   <section id="modis-information" class="mb-3 p-3 rounded bg-light">
     <h4>MODIS Status</h4>
-    <table class="table table-sm">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Collection</th>
-          <th>Images</th>
-          <th>Last Image</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for modis in job.modis_entries.all %}
-        <tr>
-          <td>{{ modis.get_name_display }}</td>
-          <td>{{ modis.collection }}</td>
-          <td>{{ modis.images }}</td>
-          <td>{{ modis.last_image }}</td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="4">No Modis information found.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Collection</th>
+              <th>Images</th>
+              <th>Last Image</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for modis in job.modis_entries.all %}
+            <tr>
+              <td>{{ modis.get_name_display }}</td>
+              <td>{{ modis.collection }}</td>
+              <td>{{ modis.images }}</td>
+              <td>{{ modis.last_image }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="4">No Modis information found.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
   </section>
 {% endblock content %}

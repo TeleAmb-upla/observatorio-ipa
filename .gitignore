@@ -167,3 +167,6 @@ configs/
 support_docs/
 db/
 manifests/
+**/staticfiles/
+*.sqlite3
+*.log

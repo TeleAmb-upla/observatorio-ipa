@@ -6,23 +6,28 @@
 {% block content %}
   <h2>Running Jobs</h2>
   <section class="mb-3 p-3 rounded bg-light">
-    <div class ="row">
-    <div class="col-md-4 mb-3">
-      <div class="d-flex mb-3 align-items-center justify-content-between gap-2">
-        <form method="get" class="flex-grow-1 d-flex" autocomplete="off">
-          <div class="input-group flex-nowrap">
-            <input type="text" name="running_job_search" class="form-control" placeholder="Search Running Job by ID" value="{{ running_job_search_query }}">
-            <button class="btn btn-primary" type="submit">Search</button>
-            {% if running_job_search_query %}
-              <a href="?" class="btn btn-outline-secondary">Clear</a>
-            {% endif %}
+    <div class="row mb-3">
+      <div class="col-lg-9 col-12 order-2 order-lg-1">
+        <form method="get" autocomplete="off">
+          <div class="row g-2">
+            <!-- Search bar: always full width, but only on xs is it alone -->
+            <div class="col-12 col-lg-6">
+              <input type="text" name="running_job_search" class="form-control" placeholder="Search Running Job by ID" value="{{ running_job_search_query }}">
+            </div>
+            <!-- Date picker and button: stacked on xs, inline otherwise -->
+            <div class="col-12 col-lg-6 d-flex flex-row flex-wrap">
+              <input type="date" name="running_job_created_at" class="form-control me-2 mb-2 mb-lg-0" value="{{ running_job_created_at_query }}" style="max-width: 180px;">
+              <button class="btn btn-primary mb-2 mb-lg-0" type="submit">Search</button>
+              {% if running_job_search_query or running_job_created_at_query %}
+                <a href="?" class="btn btn-outline-secondary ms-2 mb-2 mb-lg-0">Clear</a>
+              {% endif %}
+            </div>
           </div>
         </form>
       </div>
-    </div>
-    <div class="col-md-4 mb-3">
-      <a href="{% url 'job_list' %}" class="btn btn-outline-secondary ms-2">View All Jobs</a>
-    </div>
+      <div class="col-lg-3 order-1 order-lg-3 mb-3">
+        <a href="{% url 'job_list' %}" class="btn btn-outline-secondary ms-2">View All Jobs</a>
+      </div>
     </div>
     {% render_table table %}
     {% if table.rows|length == 0 %}

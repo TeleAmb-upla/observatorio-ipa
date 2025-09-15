@@ -19,14 +19,20 @@ class RunningJobsListView(LoginRequiredMixin, SingleTableMixin, ListView):
     def get_queryset(self):
         queryset = Job.objects.filter(job_status="RUNNING").order_by("-created_at")
         search_query = self.request.GET.get("running_job_search", "").strip()
+        created_at_query = self.request.GET.get("running_job_created_at", "").strip()
         if search_query:
             queryset = queryset.filter(Q(id__icontains=search_query))
+        if created_at_query:
+            queryset = queryset.filter(created_at__date=created_at_query)
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["running_job_search_query"] = self.request.GET.get(
             "running_job_search", ""
+        ).strip()
+        context["running_job_created_at_query"] = self.request.GET.get(
+            "running_job_created_at", ""
         ).strip()
         return context
 
@@ -40,13 +46,19 @@ class JobListView(LoginRequiredMixin, SingleTableMixin, ListView):
     def get_queryset(self):
         queryset = super().get_queryset().order_by("-created_at")
         search_query = self.request.GET.get("job_search", "").strip()
+        created_at_query = self.request.GET.get("job_created_at", "").strip()
         if search_query:
             queryset = queryset.filter(Q(id__icontains=search_query))
+        if created_at_query:
+            queryset = queryset.filter(created_at__date=created_at_query)
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["job_search_query"] = self.request.GET.get("job_search", "").strip()
+        context["job_created_at_query"] = self.request.GET.get(
+            "job_created_at", ""
+        ).strip()
         return context
 
 
