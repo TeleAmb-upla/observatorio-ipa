@@ -31,7 +31,7 @@ ENV UV_TOOL_BIN_DIR=/usr/local/bin
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-dev
+    uv sync --locked --no-install-project --no-dev --extra ipa
 
 # create standard paths for db, manifest and logs
 RUN mkdir -p /var/lib/observatorio_ipa/manifests /var/log/observatorio_ipa
@@ -40,7 +40,7 @@ RUN mkdir -p /var/lib/observatorio_ipa/manifests /var/log/observatorio_ipa
 # Installing separately from its dependencies for optimal layer caching
 COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
+    uv sync --locked --no-dev --extra ipa
 
 
 # Place executables in the environment at the front of the path
