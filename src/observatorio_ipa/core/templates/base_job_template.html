@@ -158,7 +158,13 @@
                 </tr>
                 <tr>
                     <td class="tbl-cell status-tbl-label">Job ID:</td>
-                    <td class="tbl-cell status-tbl-data">{{ id }}</td>
+                    <td class="tbl-cell status-tbl-data">
+                        {% if frontend_url %}
+                            <a href="{{ frontend_url }}/jobs/{{ id }}">{{ id }}</a>
+                        {% else %}
+                            {{ id }}
+                        {% endif %}
+                    </td>
                 </tr>
                 <tr>
                     <td class="tbl-cell status-tbl-label">Start Time:</td>

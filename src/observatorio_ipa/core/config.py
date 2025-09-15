@@ -442,6 +442,13 @@ class HeartbeatSettings(BaseSettings):
     heartbeat_file: Path = Path(HEALTHCHECK_HEARTBEAT_FILE)
 
 
+class FrontendSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+    url: str | None = None
+
+
 class AutoRunSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
@@ -452,6 +459,7 @@ class AutoRunSettings(BaseSettings):
     orchestration_job: AutoOrchestrationSettings
     website: AutoWebsiteSettings
     heartbeat: HeartbeatSettings
+    frontend: FrontendSettings
 
 
 class AppSettings(BaseSettings):
