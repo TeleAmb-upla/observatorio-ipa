@@ -78,19 +78,19 @@ def _calc_ym_means_per_basin(
 
     # -----------------------------------------------------------------------------------------------------------------------
     # SCI and CCI correction
-    #! INCONSISTENCY: Original JS did not apply round() in the correction while other scripts did
-    #! Names here SCA, CCA while in other scripts they are  CP, SP or CCI, SCI
     # -----------------------------------------------------------------------------------------------------------------------
     ee_TACbyYearMonth_ic = (
         ee_icollection.map(
-            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CCA")
+            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CP")
         )
         .map(
             lambda ee_image: common._ee_correct_SCI_band(
-                ee_image, "Snow_TAC", "Cloud_TAC", "SCA"
+                ee_image, "Snow_TAC", "Cloud_TAC", "SP"
             )
         )
-        .select(["SCA", "CCA"])
+        .select(
+            ["SP", "CP"], ["SCA", "CCA"]
+        )  # Rename bands to SCA and CCA to keep below code as-is
     )
 
     # -----------------------------------------------------------------------------------------------------------------------

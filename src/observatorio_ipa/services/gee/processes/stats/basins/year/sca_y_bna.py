@@ -5,8 +5,6 @@ Series ImageCollection with yearly images per area of interest (basin)
 Adapted from the JavaScript implementation at users/observatorionieves/modules/Estadistica/Cuencas/Year/SCA_y_BNA.
 """
 
-#! Month Statistics had Percentiles, Year only has the region mean
-#! CAUTION SCA values are not matching with the original JS code Due to a Rounding in the SCI correction. Verify which is expected (rounding or no rounding)
 # TODO Create a new function for copying properties in a feature collection to reduce the map verbosity
 
 import ee
@@ -82,8 +80,6 @@ def _ee_calc_year_basin_stats(
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # Calculate snowline elevation
-    #! INCONSISTENCY: Original JS did not apply round() in the correction while other scripts did
-    #! Names here are CP, SP while in other scripts they are CCI, SCI or CCA, SCA
     # ------------------------------------------------------------------------------------------------------------------------------
 
     ee_TACbyYear_ic = (
@@ -102,7 +98,6 @@ def _ee_calc_year_basin_stats(
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # Reduce to single value per region
-    # TODO: This was separated to common function in the monthly process, but Month property was hardcoded so not using it here (yet)
     # ------------------------------------------------------------------------------------------------------------------------------
 
     ee_year_basin_fc = ee.featurecollection.FeatureCollection(
@@ -125,13 +120,6 @@ def _ee_calc_year_basin_stats(
     ee_year_basin_fc = common._ee_format_properties_2decimals(
         ee_year_basin_fc, ["SCA", "CCA"]
     )
-
-    # # Format Year property to integer
-    # def _ee_format_year(ee_feature: ee.feature.Feature):
-    #     year = ee.ee_number.Number(ee_feature.get("Year")).format("%.0f")
-    #     return ee_feature.set("Year", year)
-
-    # ee_year_basin_fc = ee_year_basin_fc.map(_ee_format_year)
 
     return ee_year_basin_fc
 

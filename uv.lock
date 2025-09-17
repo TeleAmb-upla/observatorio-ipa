@@ -2187,7 +2187,7 @@ wheels = [
 
 [[package]]
 name = "observatorio-ipa"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "email-validator" },
@@ -2275,7 +2275,7 @@ provides-extras = ["ipa", "web"]
 [package.metadata.requires-dev]
 dev = [
     { name = "black", specifier = ">=25.1.0" },
-    { name = "geemap", specifier = ">=0.36.0,<1.0.0" },
+    { name = "geemap", specifier = ">=0.36.2,<1.0.0" },
     { name = "jupyter", specifier = ">=1.1.1,<2.0.0" },
     { name = "logging-tree", specifier = ">=1.10,<2.0" },
     { name = "myst-nb", specifier = ">=1.2.0,<2.0.0" },

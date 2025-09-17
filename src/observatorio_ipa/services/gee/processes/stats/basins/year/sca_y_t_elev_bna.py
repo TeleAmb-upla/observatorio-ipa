@@ -5,7 +5,6 @@ multi-year Time Series ImageCollection with yearly images and an Area of Interes
 Adapted from the JavaScript implementation at users/observatorionieves/modules/Estadistica/Cuencas/Month/SCA_y_t_elev_BNA.
 """
 
-# ! INCONSISTENCY: sans_slope was calculated and converted to Int which other codes don't do.
 # ! INCONSISTENCY: sans_slope was unmasked in this code but not in sca_y_t_elev_bna.py
 
 import ee
@@ -45,8 +44,6 @@ def _ee_calc_year_trend_per_elev_basin(
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # SCI and CCI Correction
-    #! INCONSISTENCY: Original JS did not apply round() in the correction while other scripts did
-    #! Names here are CP, SP while in other scripts they are CCI, SCI or CCA, SCA
     # ------------------------------------------------------------------------------------------------------------------------------
 
     ee_TACbyYear_ic = (
@@ -91,7 +88,6 @@ def _ee_calc_year_trend_per_elev_basin(
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # Calculate SCA by elevation
-    # ! In the original JS code the "sans_slope" band was named "Tendencia"
     # ------------------------------------------------------------------------------------------------------------------------------
 
     ee_mean_slope_by_elev_fc = common._ee_calc_spatial_mean_per_elev(
@@ -107,6 +103,11 @@ def _ee_calc_year_trend_per_elev_basin(
         ee_mean_slope_by_elev_fc,
         source_property_name="sens_slopes",
         target_property_name="Tendencia",
+    )
+
+    # Round values to 2 digits
+    ee_mean_slope_by_elev_fc = common._ee_format_properties_2decimals(
+        ee_mean_slope_by_elev_fc, properties=["Tendencia"]
     )
 
     return ee_mean_slope_by_elev_fc

@@ -5,8 +5,6 @@ Originally based on JS code from users/observatorionieves/modules/Estadistica/Cu
 
 """
 
-# ! WARNING: Results exported with JS show the same values for CCA and SCA. This code produces different values for CCA and SCA.
-
 import ee
 from typing import Literal
 from observatorio_ipa.services.gee.processes.stats import common
@@ -43,21 +41,21 @@ def _ee_calc_stats_per_elev_bin(
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # Correct SCI and CCI
-    # ! INCONSISTENCY: Original JS code uses round() while correction in most other JS codes don't
-    # ! INCONSISTENCY: Original JS code uses SCI and CCI, while this code uses SCA and CCA
     # ------------------------------------------------------------------------------------------------------------------------------
 
     # Apply correction functions to original collection. Corrects the whole Image, not just the basin
     ee_TACbyYear_ic: ee.imagecollection.ImageCollection = (
         ee_icollection.map(
-            lambda ee_img: common._ee_correct_CCI_band(ee_img, "Cloud_TAC", "CCA")
+            lambda ee_img: common._ee_correct_CCI_band(ee_img, "Cloud_TAC", "CP")
         )
         .map(
             lambda ee_img: common._ee_correct_SCI_band(
-                ee_img, "Snow_TAC", "Cloud_TAC", "SCA"
+                ee_img, "Snow_TAC", "Cloud_TAC", "SP"
             )
         )
-        .select(["SCA", "CCA"])
+        .select(
+            ["SP", "CP"], ["SCA", "CCA"]
+        )  # rename bands back to original names to keep below code as-is
     )
 
     # ------------------------------------------------------------------------------------------------------------------------------

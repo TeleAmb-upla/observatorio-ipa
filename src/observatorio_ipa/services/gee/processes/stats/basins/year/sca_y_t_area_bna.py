@@ -45,26 +45,6 @@ def _ee_calc_area_km2_per_slope_bin(
         ee_binary_significant_slopes_img, ee_slope_bin_fc, "sens_slopes"
     )
 
-    # # Calculate area in km² for slope bin
-    # ee_slope_bin_area_dict = (
-    #     ee_significant_slopes_img.gt(-10000)
-    #     .multiply(ee.image.Image.pixelArea())
-    #     .divide(1000000)
-    #     .reduceRegion(
-    #         reducer=ee.reducer.Reducer.sum(),
-    #         geometry=ee_slope_bin_fc,
-    #         scale=DEFAULT_SCALE,
-    #     )
-    # )
-
-    # #! Why is it multiplying and dividing by 100?
-    # ee_area = (
-    #     ee.ee_number.Number(ee_slope_bin_area_dict.get("sens_slopes"))
-    #     .multiply(100)
-    #     .round()
-    #     .divide(100)
-    # )
-
     return (
         ee_slope_bin_fc.first().set("Area", ee_area).set("Sen_slope", ee_slope_bin_str)
     )
@@ -99,8 +79,6 @@ def _ee_calc_year_trend_per_basin(
 
     # -----------------------------------------------------------------------------------------------------------------------
     # 4. SCI and CCI Correction
-    #! INCONSISTENCY: Original JS did not apply round() in the correction while other scripts did
-    #! Names here are CP, SP while in other scripts they are CCI, SCI or CCA, SCA
     # -----------------------------------------------------------------------------------------------------------------------
     ee_TACbyYear_ic = (
         ee_icollection.map(
@@ -219,6 +197,11 @@ def _ee_calc_year_trend_per_basin(
 
     ee_slopes_bins_area_fc = ee_slopes_bins_area_fc.map(
         lambda ee_feature: _ee_rename_slope_bins(ee_feature, ee_newNames_list)
+    )
+
+    # Round values to 2 digits
+    ee_slopes_bins_area_fc = common._ee_format_properties_2decimals(
+        ee_slopes_bins_area_fc, properties=["Area"]
     )
 
     return ee_slopes_bins_area_fc

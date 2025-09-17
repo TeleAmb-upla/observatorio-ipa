@@ -116,20 +116,19 @@ def _ee_calc_month_trend_per_basin(
 
     # ----------------------------------------------------------------------------------------------------------------------
     # SCI and CCI Correction
-    #! INCONSISTENCY: Most Corrections are applied as first steps before temporal or region reduction
-    #! INCONSISTENCY: Original JS applied round() in the correction while most other scripts didn't
-    #! INCONSISTENCY: Sometimes the correction is renamed to SCI/CCI while other times it's SCA/CCI
     # ----------------------------------------------------------------------------------------------------------------------
     ee_TACbyYearMonth_ic = (
         ee_icollection.map(
-            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CCA")
+            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CP")
         )
         .map(
             lambda ee_image: common._ee_correct_SCI_band(
-                ee_image, "Snow_TAC", "Cloud_TAC", "SCA"
+                ee_image, "Snow_TAC", "Cloud_TAC", "SP"
             )
         )
-        .select(["SCA", "CCA"])
+        .select(
+            ["SP", "CP"], ["SCA", "CCA"]
+        )  # Rename SCA and CCA to keep below code as-is
     )
 
     # ----------------------------------------------------------------------------------------------------------------------
@@ -150,47 +149,9 @@ def _ee_calc_month_trend_per_basin(
     )
 
     # ----------------------------------------------------------------------------------------------------------------------
-    # 5. Reduce to single value for basin and consolidate results
+    # SPATIAL REDUCTION
+    # Reduce to single value for basin and consolidate results
     # ----------------------------------------------------------------------------------------------------------------------
-
-    # def _ee_reduce_region(
-    #     ee_image: ee.image.Image,
-    #     ee_basin_fc: ee.featurecollection.FeatureCollection,
-    #     property: str,
-    # ) -> ee.featurecollection.FeatureCollection:
-    #     """Reduce the image to a feature collection with mean values per basin."""
-
-    #     # Reduce image to single values of sens_slope for basin
-    #     ee_fc = ee.featurecollection.FeatureCollection(
-    #         ee_image.reduceRegions(
-    #             collection=ee_basin_fc.select([property]),
-    #             reducer=ee.reducer.Reducer.mean(),
-    #             scale=DEFAULT_SCALE,
-    #         )  # .set("group", "trend") # Redundant, added again when setting properties
-    #     )
-
-    #     def _ee_set_properties(
-    #         ee_feature: ee.feature.Feature, ee_image: ee.image.Image
-    #     ) -> ee.feature.Feature:
-    #         """Set properties for the feature."""
-    #         return ee.feature.Feature(
-    #             ee_feature.set("imageId", ee_image.id())
-    #             .set("Month", ee_image.get("month"))
-    #             .set("group", "trend")
-    #         )
-
-    #     ee_fc: ee.featurecollection.FeatureCollection = ee_fc.map(
-    #         lambda f: _ee_set_properties(f, ee_image)
-    #     )
-    #     return ee_fc
-
-    # ee_month_significant_slopes_fc: ee.featurecollection.FeatureCollection = (
-    #     ee_month_significant_slopes_ic.map(
-    #         lambda ee_image: _ee_reduce_region(
-    #             ee_image, ee_basin_fc, basins_cd_property
-    #         )
-    #     ).flatten()
-    # )
 
     ee_month_significant_slopes_fc: ee.featurecollection.FeatureCollection = (
         ee_month_significant_slopes_ic.map(

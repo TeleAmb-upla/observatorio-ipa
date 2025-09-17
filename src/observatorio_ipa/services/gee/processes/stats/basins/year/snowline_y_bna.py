@@ -84,20 +84,20 @@ def _ee_calc_y_snowline_per_basin(
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # SCI and CCI Correction
-    #! INCONSISTENCY: Original JS did not apply round() in the correction while other scripts did
-    #! Names here SCI, CCI while in other scripts they are  CP, SP or CCA, SCA
     # ------------------------------------------------------------------------------------------------------------------------------
 
     ee_TACbyYearMonth_ic = (
         ee_icollection.map(
-            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CCI")
+            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CP")
         )
         .map(
             lambda ee_image: common._ee_correct_SCI_band(
-                ee_image, "Snow_TAC", "Cloud_TAC", "SCI"
+                ee_image, "Snow_TAC", "Cloud_TAC", "SP"
             )
         )
-        .select(["SCI", "CCI"])
+        .select(
+            ["SP", "CP"], ["SCI", "CCI"]
+        )  # Renaming back to SCI and CCI to keep code below as-is
     )
 
     # ------------------------------------------------------------------------------------------------------------------------------
@@ -134,7 +134,7 @@ def _ee_calc_y_snowline_per_basin(
     # ------------------------------------------------------------------------------------------------------------------------------
 
     # ! CAUTION: JUST FOR TESTING.
-    # ee_snowlineByYear_ic = ee_snowlineByYear_ic.select(["Snowline_elev", "SCI"])
+    ee_snowlineByYear_ic = ee_snowlineByYear_ic.select(["Snowline_elev"])
 
     ee_y_snowline_per_basin_fc = ee_snowlineByYear_ic.map(
         lambda ee_image: sca_y_bna._ee_calc_year_spatial_mean(
@@ -142,20 +142,31 @@ def _ee_calc_y_snowline_per_basin(
         )
     ).flatten()
 
-    # Format Snowline_elev
-    def _ee_format_snowline(ee_feature: ee.feature.Feature) -> ee.feature.Feature:
-        return ee.feature.Feature(
-            ee_feature.set(
-                "Snowline_elev",
-                ee.Algorithms.If(
-                    ee_feature.get("Snowline_elev"),
-                    ee.ee_number.Number(ee_feature.get("Snowline_elev")).format("%.2f"),
-                    None,
-                ),
-            )
+    # Rename property mean to Snowline_elev
+    ee_y_snowline_per_basin_fc = ee_y_snowline_per_basin_fc.map(
+        lambda ee_feature: common._ee_copy_feature_property(
+            ee_feature, "mean", "Snowline_elev"
         )
+    )
 
-    ee_y_snowline_per_basin_fc = ee_y_snowline_per_basin_fc.map(_ee_format_snowline)
+    # Format Snowline_elev
+    # def _ee_format_snowline(ee_feature: ee.feature.Feature) -> ee.feature.Feature:
+    #     return ee.feature.Feature(
+    #         ee_feature.set(
+    #             "Snowline_elev",
+    #             ee.Algorithms.If(
+    #                 ee_feature.get("Snowline_elev"),
+    #                 ee.ee_number.Number(ee_feature.get("Snowline_elev")).format("%.2f"),
+    #                 None,
+    #             ),
+    #         )
+    #     )
+
+    # ee_y_snowline_per_basin_fc = ee_y_snowline_per_basin_fc.map(_ee_format_snowline)
+
+    ee_y_snowline_per_basin_fc = common._ee_format_properties_2decimals(
+        ee_y_snowline_per_basin_fc, properties=["Snowline_elev"]
+    )
 
     return ee_y_snowline_per_basin_fc
 

@@ -8,11 +8,6 @@ SCA of all Januaries over several years.
 Adapted from the JavaScript implementation at users/observatorionieves/modules/Estadistica/Cuencas/Month/SCA_m_BNA.
 """
 
-#! WARNING: This code does not correct CCI and SCI bands as other scripts do.
-#! Mean values are calculated in the monthly reductions but never used. P50 is used instead
-#! Cloud statistics are calculated but never used
-
-
 import ee
 from typing import Literal
 from observatorio_ipa.core.defaults import DEFAULT_CHI_PROJECTION, DEFAULT_SCALE
@@ -113,7 +108,23 @@ def _ee_calc_month_basin_stats(
         ee.filter.Filter.eq(basins_cd_property, basin_code)
     )
 
-    #! WARNING: This code does not correct CCI and SCI bands as other scripts do.
+    # ---------------------------------------------------------------------------------------------------------------------
+    # SCI and CCI correction
+    # ---------------------------------------------------------------------------------------------------------------------
+
+    ee_TACbyMonth_ic = (
+        ee_icollection.map(
+            lambda ee_img: common._ee_correct_CCI_band(ee_img, "Cloud_TAC", "CP")
+        )
+        .map(
+            lambda ee_img: common._ee_correct_SCI_band(
+                ee_img, "Snow_TAC", "Cloud_TAC", "SP"
+            )
+        )
+        .select(
+            ["SP", "CP"], ["Snow_TAC", "Cloud_TAC"]
+        )  # rename bands back to original names to keep below code as-is
+    )
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # Month Reduction - Calculate Statistics for each month across years for the basin
@@ -124,19 +135,27 @@ def _ee_calc_month_basin_stats(
     ee_months_list = ee.ee_list.List.sequence(1, 12)
 
     # Calculate monthly NDSI (Normalized Difference Snow Index) for the basin
-    ee_TACbyMonth_ic = ee.imagecollection.ImageCollection.fromImages(
+    ee_StatsByMonth_ic = ee.imagecollection.ImageCollection.fromImages(
         ee_months_list.map(
             lambda ee_month: _ee_calc_month_xci_temporal_stats(
-                ee_month, ee_icollection, ee_basin_fc
+                ee_month, ee_TACbyMonth_ic, ee_basin_fc
             )
         ).flatten()  # Flatten is added but might not be necessary
     )
 
     # select and rename bands
-    #! Mean is actually the Median, it comes from SNOW_TAC_p50
-    ee_TACbyMonth_ic = ee_TACbyMonth_ic.select(
-        ["Snow_TAC_p50", "Snow_TAC_p25", "Snow_TAC_p75"],
-        ["Mean", "P25", "P75"],
+    ee_StatsByMonth_ic = ee_StatsByMonth_ic.select(
+        [
+            "Snow_mean",
+            "Snow_TAC_p0",
+            "Snow_TAC_p5",
+            "Snow_TAC_p25",
+            "Snow_TAC_p50",
+            "Snow_TAC_p75",
+            "Snow_TAC_p90",
+            "Snow_TAC_p100",
+        ],
+        ["Mean", "Min", "P5", "P25", "Median", "P75", "P90", "Max"],
     )
 
     # ------------------------------------------------------------------------------------------------------------------------------
@@ -145,7 +164,7 @@ def _ee_calc_month_basin_stats(
     # - in the collection, from the mean of the days in the month.
     # ------------------------------------------------------------------------------------------------------------------------------
 
-    ee_month_basin_stats_fc = ee_TACbyMonth_ic.map(
+    ee_month_basin_stats_fc = ee_StatsByMonth_ic.map(
         lambda ee_img: _ee_calc_month_spatial_mean(
             ee_img, ee_basin_fc, basins_cd_property
         )
@@ -153,7 +172,8 @@ def _ee_calc_month_basin_stats(
 
     # Round elevation values
     ee_month_basin_stats_fc = common._ee_format_properties_2decimals(
-        ee_month_basin_stats_fc, ["Mean", "P25", "P75"]
+        ee_month_basin_stats_fc,
+        ["Mean", "Min", "P5", "P25", "Median", "P75", "P90", "Max"],
     )
 
     return ee_month_basin_stats_fc
@@ -192,7 +212,17 @@ class SCA_M_BNA(common.BaseBasinStats):
     ):
         # lazy argument passing. Consider moving to explicit arguments
         args = {k: v for k, v in locals().items() if k != "self"}
-        bands_of_interest = ["Month", "Mean", "P25", "P75"]
+        bands_of_interest = [
+            "Month",
+            "Mean",
+            "Min",
+            "P5",
+            "P25",
+            "Median",
+            "P75",
+            "P90",
+            "Max",
+        ]
         super().__init__(bands_of_interest=bands_of_interest, **args)
 
     def stats_proc(self, basin_code) -> ee.featurecollection.FeatureCollection:

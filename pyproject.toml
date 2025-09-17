@@ -62,7 +62,7 @@ dev = [
     "python-dotenv >=1.1.0,<2.0.0",
     "logging-tree >=1.10,<2.0",
     "python-semantic-release >=9.21.1,<10.0.0",
-    "geemap>=0.36.0,<1.0.0",
+    "geemap>=0.36.2,<1.0.0",
     "black>=25.1.0",
 ]
 
