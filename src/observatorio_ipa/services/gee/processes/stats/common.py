@@ -455,6 +455,7 @@ class BaseStats(ABC):
                         task = ee.batch.Export.table.toCloudStorage(
                             collection=ee_stats_fc,
                             description=table_name,
+                            selectors=self.bands_of_interest,
                             bucket=self.storage_bucket,
                             fileNamePrefix=storage_path.as_posix(),
                             fileFormat="CSV",
