@@ -148,11 +148,15 @@ def _ee_calc_cci_sci_temporal_stats(
     # Calculate mean pixel values for Snow and Cloud across years
     #  | TAC values are between 0-100, so a mean would result in a %, which is percent of times the pixel was covered
     #  | by snow or clouds in the same month across the years. Values should be between 0 and 100.
-    ee_snow_mean_img: ee.image.Image = (
-        ee_icollection.select("Snow_TAC").mean().rename("Snow_mean")
+    # Compute mean and stddev for Snow_TAC in one go
+    # Output bands: 'Snow_TAC_mean', 'Snow_TAC_stdDev'
+    ee_snow_stats_img: ee.image.Image = ee_icollection.select("Snow_TAC").reduce(
+        ee.reducer.Reducer.mean().combine(ee.reducer.Reducer.stdDev(), "", True)
     )
-    ee_cloud_mean_img: ee.image.Image = (
-        ee_icollection.select("Cloud_TAC").mean().rename("Cloud_mean")
+    # Compute mean and stddev for Cloud_TAC in one go
+    # Output bands: 'Cloud_TAC_mean', 'Cloud_TAC_stdDev'
+    ee_cloud_stats_img: ee.image.Image = ee_icollection.select("Cloud_TAC").reduce(
+        ee.reducer.Reducer.mean().combine(ee.reducer.Reducer.stdDev(), "", True)
     )
 
     # Calculate percentiles
@@ -173,8 +177,8 @@ def _ee_calc_cci_sci_temporal_stats(
 
     ee_consolidated_img = ee.image.Image(
         [
-            ee_snow_mean_img,
-            ee_cloud_mean_img,
+            ee_snow_stats_img,  # Bands: Snow_TAC_mean, Snow_TAC_stdDev
+            ee_cloud_stats_img,  # Bands: Cloud_TAC_mean, Cloud_TAC_stdDev
             ee_snow_percentiles_img,
             ee_cloud_percentiles_img,
         ]

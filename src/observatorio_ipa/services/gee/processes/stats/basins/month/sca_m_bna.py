@@ -146,7 +146,8 @@ def _ee_calc_month_basin_stats(
     # select and rename bands
     ee_StatsByMonth_ic = ee_StatsByMonth_ic.select(
         [
-            "Snow_mean",
+            "Snow_TAC_mean",
+            "Snow_TAC_stdDev",
             "Snow_TAC_p0",
             "Snow_TAC_p5",
             "Snow_TAC_p25",
@@ -155,7 +156,7 @@ def _ee_calc_month_basin_stats(
             "Snow_TAC_p90",
             "Snow_TAC_p100",
         ],
-        ["Mean", "Min", "P5", "P25", "Median", "P75", "P90", "Max"],
+        ["Mean", "StdDev", "Min", "P5", "P25", "Median", "P75", "P90", "Max"],
     )
 
     # ------------------------------------------------------------------------------------------------------------------------------
@@ -173,7 +174,7 @@ def _ee_calc_month_basin_stats(
     # Round elevation values
     ee_month_basin_stats_fc = common._ee_format_properties_2decimals(
         ee_month_basin_stats_fc,
-        ["Mean", "Min", "P5", "P25", "Median", "P75", "P90", "Max"],
+        ["Mean", "StdDev", "Min", "P5", "P25", "Median", "P75", "P90", "Max"],
     )
 
     return ee_month_basin_stats_fc
@@ -215,6 +216,7 @@ class SCA_M_BNA(common.BaseBasinStats):
         bands_of_interest = [
             "Month",
             "Mean",
+            "StdDev",
             "Min",
             "P5",
             "P25",
