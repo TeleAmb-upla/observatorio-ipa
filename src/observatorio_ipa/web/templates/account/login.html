@@ -1,0 +1,26 @@
+{% extends "_base.html" %}
+{% load i18n %}
+
+
+{% block content %}
+<div class="flex-grow-1 d-flex align-items-center justify-content-center">
+    <main class="form-signin w-100" style="max-width: 330px; padding: 1rem;">
+        <form method="post">
+            <h1 class="h3 mb-3 fw-normal text-left">{% trans "Sign In" %}</h1>
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div class="form-floating mb-2">
+                <input type="text" name="login" class="form-control" id="id_login" placeholder="name@example.com" required autofocus>
+                <label for="id_login">{% trans "Email or Username" %}</label>
+            </div>
+            <div class="form-floating mb-2">
+                <input type="password" name="password" class="form-control" id="id_password" placeholder="Password" required>
+                <label for="id_password">{% trans "Password" %}</label>
+            </div>
+            <button class="btn btn-primary w-100 py-2" type="submit">{% trans "Sign In" %}</button>
+        </form>
+    </main>
+</div>
+{% endblock %}

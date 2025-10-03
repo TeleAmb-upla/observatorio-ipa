@@ -778,7 +778,7 @@ def _lease_due_tasks(session: Session) -> list[Export]:
 
 
 # ALCHEMY DONE
-def exportTask_from_db_row(db_row: Row) -> ExportTask:
+def exportTask_from_db_row(db_row: Export) -> ExportTask:
     """Creates an ExportTask from a db export row
 
     Expects a SQLAlchemy Row object.
@@ -803,7 +803,7 @@ def exportTask_from_db_row(db_row: Row) -> ExportTask:
         task = None
 
     return ExportTask(
-        type=db_row.type,
+        type=db_row.type,  # type: ignore
         name=db_row.name,
         target=db_row.target,
         path=db_row.path,
@@ -815,7 +815,7 @@ def exportTask_from_db_row(db_row: Row) -> ExportTask:
 
 # ALCHEMY DONE
 # TODO: Review deadline_at usage for tasks
-def update_task_status(session: Session, db_task: Row) -> None:
+def update_task_status(session: Session, db_task: Export) -> None:
     """Updates the status of a GEE task and saves status in 'tasks' database table.
 
     Given a sqlite3.Row (query row) object representing a task, will convert to
@@ -1584,7 +1584,9 @@ def auto_job_orchestration(
         return
     else:
         # Generate Report
-        auto_job_report(session, job.id, settings.app.email)
+        auto_job_report(
+            session, job.id, settings.app.email, settings.app.automation.frontend.url
+        )
         session.commit()
         update_job(session, job.id)
         session.commit()

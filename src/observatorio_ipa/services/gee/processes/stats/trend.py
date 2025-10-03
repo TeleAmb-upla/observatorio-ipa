@@ -107,8 +107,11 @@ def _ee_calc_temporal_trend_stats(
 
         return (
             ee_future_img.subtract(ee_current_img)
-            # .divide(ee_future_img.date().difference(ee_current_img.date(), ts_frequency))
-            .rename("slope").float()
+            .divide(
+                ee_future_img.date().difference(ee_current_img.date(), ts_frequency)
+            )
+            .rename("slope")
+            .float()
         )
 
     def _ee_calc_ts_slopes(

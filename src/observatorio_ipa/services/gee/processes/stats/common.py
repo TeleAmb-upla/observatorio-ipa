@@ -14,9 +14,6 @@ logger = logging.getLogger(__name__)
 
 #! Description of this function might be incorrect, need to better explain what the correction is
 #! Wouldn't division cause division by zero?
-#! Formula is inconsistent across scripts. Month scripts include a round() year codes don't
-#! WARNING: Temporarily removing round for YEAR script testing
-#! WARNING: Significant differences were found when running with vs without round(). see MCD_SCA_y_t_area_BNA_023 for example
 def _ee_correct_SCI_band(
     ee_image: ee.image.Image,
     sci_band: str,  # = "Snow_TAC",
@@ -42,7 +39,7 @@ def _ee_correct_SCI_band(
         ee_image.select(sci_band)
         .divide(ee_CCI_corrected_img)
         .multiply(100)
-        # .round()
+        # .round()  # Removed as of 160925 for consistency
         .rename(sci_output_band_name)
     )
     return ee_image.addBands(ee_SCI_CCI_img)
@@ -151,31 +148,37 @@ def _ee_calc_cci_sci_temporal_stats(
     # Calculate mean pixel values for Snow and Cloud across years
     #  | TAC values are between 0-100, so a mean would result in a %, which is percent of times the pixel was covered
     #  | by snow or clouds in the same month across the years. Values should be between 0 and 100.
-    ee_snow_mean_img: ee.image.Image = (
-        ee_icollection.select("Snow_TAC").mean().rename("Snow_mean")
+    # Compute mean and stddev for Snow_TAC in one go
+    # Output bands: 'Snow_TAC_mean', 'Snow_TAC_stdDev'
+    ee_snow_stats_img: ee.image.Image = ee_icollection.select("Snow_TAC").reduce(
+        ee.reducer.Reducer.mean().combine(ee.reducer.Reducer.stdDev(), "", True)
     )
-    ee_cloud_mean_img: ee.image.Image = (
-        ee_icollection.select("Cloud_TAC").mean().rename("Cloud_mean")
+    # Compute mean and stddev for Cloud_TAC in one go
+    # Output bands: 'Cloud_TAC_mean', 'Cloud_TAC_stdDev'
+    ee_cloud_stats_img: ee.image.Image = ee_icollection.select("Cloud_TAC").reduce(
+        ee.reducer.Reducer.mean().combine(ee.reducer.Reducer.stdDev(), "", True)
     )
 
     # Calculate percentiles
     ee_snow_percentiles_img: ee.image.Image = ee_icollection.select("Snow_TAC").reduce(
         ee.reducer.Reducer.percentile(
-            [0, 25, 50, 75, 100], ["p0", "p25", "p50", "p75", "p100"]
+            [0, 5, 25, 50, 75, 90, 100],
+            ["p0", "p5", "p25", "p50", "p75", "p90", "p100"],
         )
     )
     ee_cloud_percentiles_img: ee.image.Image = ee_icollection.select(
         "Cloud_TAC"
     ).reduce(
         ee.reducer.Reducer.percentile(
-            [0, 25, 50, 75, 100], ["p0", "p25", "p50", "p75", "p100"]
+            [0, 5, 25, 50, 75, 90, 100],
+            ["p0", "p5", "p25", "p50", "p75", "p90", "p100"],
         )
     )
 
     ee_consolidated_img = ee.image.Image(
         [
-            ee_snow_mean_img,
-            ee_cloud_mean_img,
+            ee_snow_stats_img,  # Bands: Snow_TAC_mean, Snow_TAC_stdDev
+            ee_cloud_stats_img,  # Bands: Cloud_TAC_mean, Cloud_TAC_stdDev
             ee_snow_percentiles_img,
             ee_cloud_percentiles_img,
         ]
@@ -323,8 +326,15 @@ def _ee_format_properties_2decimals(
     def _format_feature(ee_feature):
         def _format_prop(prop, prev):
             prev = ee.dictionary.Dictionary(prev)
-            value = ee.ee_number.Number(ee_feature.get(prop))
-            return prev.set(prop, value.format("%.2f"))
+            # value = ee.ee_number.Number(ee_feature.get(prop))
+            value = ee_feature.get(prop)
+            # Check if value is not None/null and is a number
+            # isNumber = ee.Algorithms.IsEqual(ee.Algorithms.ObjectType(value), "Number")
+            formatted_value = ee.Algorithms.If(
+                value, ee.ee_number.Number(value).format("%.2f"), value
+            )
+            # return prev.set(prop, value.format("%.2f"))
+            return prev.set(prop, formatted_value)
 
         # Use iterate to apply formatting to all properties
         formatted_props = ee_property_list.iterate(
@@ -449,6 +459,7 @@ class BaseStats(ABC):
                         task = ee.batch.Export.table.toCloudStorage(
                             collection=ee_stats_fc,
                             description=table_name,
+                            selectors=self.bands_of_interest,
                             bucket=self.storage_bucket,
                             fileNamePrefix=storage_path.as_posix(),
                             fileFormat="CSV",

@@ -104,48 +104,47 @@ def _ee_calc_month_stats_per_elev_bin(
     )
 
     # ---------------------------------------------------------------------------------------------------------------------
+    # SCI and CCI correction
+    # ---------------------------------------------------------------------------------------------------------------------
+
+    ee_TACbyMonth_ic = (
+        ee_icollection.map(
+            lambda ee_img: common._ee_correct_CCI_band(ee_img, "Cloud_TAC", "CP")
+        )
+        .map(
+            lambda ee_img: common._ee_correct_SCI_band(
+                ee_img, "Snow_TAC", "Cloud_TAC", "SP"
+            )
+        )
+        .select(
+            ["SP", "CP"], ["Snow_TAC", "Cloud_TAC"]
+        )  # rename bands back to original names to keep below code as-is
+    )
+
+    # ---------------------------------------------------------------------------------------------------------------------
     # Month Reduction - Calculate Statistics for each month across years for the basin
     # ---------------------------------------------------------------------------------------------------------------------
     ee_months_list = ee.ee_list.List.sequence(1, 12)
 
     # Calculate monthly NDSI (Normalized Difference Snow Index) for the basin
-    ee_TACbyMonth_ic = ee.imagecollection.ImageCollection.fromImages(
+    ee_StatsByMonth_ic = ee.imagecollection.ImageCollection.fromImages(
         ee_months_list.map(
             lambda ee_month: sca_m_bna._ee_calc_month_xci_temporal_stats(
-                ee_month, ee_icollection, ee_basin_fc
+                ee_month, ee_TACbyMonth_ic, ee_basin_fc
             )
         ).flatten()  # Flatten is added but might not be necessary
-    )
-
-    # ---------------------------------------------------------------------------------------------------------------------
-    # 4. SCI and CCI correction
-    #! INCONSISTENCY: Most Corrections are applied as first steps before temporal or region reduction
-    #! INCONSISTENCY: Original JS applied round() in the correction while most other scripts didn't
-    #! INCONSISTENCY: Sometimes the correction is renamed to SCI/CCI while other times it's SCA/CCI
-    # ---------------------------------------------------------------------------------------------------------------------
-
-    ee_TACbyMonth_ic = (
-        ee_TACbyMonth_ic.map(
-            lambda ee_img: common._ee_correct_CCI_band(ee_img, "Cloud_mean", "CCA")
-        )
-        .map(
-            lambda ee_img: common._ee_correct_SCI_band(
-                ee_img, "Snow_mean", "Cloud_mean", "SCA"
-            )
-        )
-        .select(["SCA", "CCA"])
     )
 
     # ---------------------------------------------------------------------------------------------------------------------
     # 5. Calculate SCA by elevation
     # ---------------------------------------------------------------------------------------------------------------------
 
-    ee_SCAbyMonth_elev_fc = ee_TACbyMonth_ic.map(
+    ee_SCAbyMonth_elev_fc = ee_StatsByMonth_ic.map(
         lambda ee_image: _ee_calc_month_spatial_mean_per_elev(
             ee_image,
             ee_dem_img,
             ee_basin_fc,
-            input_band_name="SCA",
+            input_band_name="Snow_mean",
             output_band_name="SCA",
         )
     ).flatten()
@@ -154,12 +153,12 @@ def _ee_calc_month_stats_per_elev_bin(
     # 6. Calculate CCA by elevation
     # ---------------------------------------------------------------------------------------------------------------------
 
-    ee_CCAbyMonth_elev_fc = ee_TACbyMonth_ic.map(
+    ee_CCAbyMonth_elev_fc = ee_StatsByMonth_ic.map(
         lambda ee_image: _ee_calc_month_spatial_mean_per_elev(
             ee_image,
             ee_dem_img,
             ee_basin_fc,
-            input_band_name="CCA",
+            input_band_name="Cloud_mean",
             output_band_name="CCA",
         )
     ).flatten()
@@ -173,9 +172,9 @@ def _ee_calc_month_stats_per_elev_bin(
     )
 
     # Round values
-    # ee_MergedByMonth_elev_fc = common._ee_format_properties_2decimals(
-    #     ee_MergedByMonth_elev_fc, ["SCA", "CCA"]
-    # )
+    ee_MergedByMonth_elev_fc = common._ee_format_properties_2decimals(
+        ee_MergedByMonth_elev_fc, ["SCA", "CCA"]
+    )
 
     return ee_MergedByMonth_elev_fc
 

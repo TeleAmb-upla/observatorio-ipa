@@ -1,0 +1,38 @@
+{% extends "_base.html" %}
+{% load render_table from django_tables2 %}
+
+{% block title %}Job List{% endblock title %}
+
+{% block content %}
+  <h2>Jobs</h2>
+  <section class="mb-3 p-3 rounded bg-light">
+    <div class="row mb-3">
+      <div class="col-lg-9 col-12">
+        <form method="get" autocomplete="off">
+          <div class="row g-2">
+            <!-- Search bar: always full width, but only on xs is it alone -->
+            <div class="col-12 col-lg-6">
+              <input type="text" name="job_search" class="form-control" placeholder="Search Job by ID" value="{{ job_search_query }}">
+            </div>
+            <!-- Date picker and button: stacked on xs, inline otherwise -->
+            <div class="col-12 col-lg-6 d-flex flex-row flex-wrap">
+              <input type="date" name="job_created_at" class="form-control me-2 mb-2 mb-lg-0" value="{{ job_created_at_query }}" style="max-width: 180px;">
+              <button class="btn btn-primary mb-2 mb-lg-0" type="submit">Search</button>
+              {% if job_search_query or job_created_at_query %}
+                <a href="?" class="btn btn-outline-secondary ms-2 mb-2 mb-lg-0">Clear</a>
+              {% endif %}
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% render_table table %}
+    {% if table.rows|length == 0 %}
+      {% if job_search_query %}
+        <div class="alert alert-warning">Job not found.</div>
+      {% else %}
+        <div class="alert alert-info">No jobs available.</div>
+      {% endif %}
+    {% endif %}
+  </section>
+{% endblock content %}

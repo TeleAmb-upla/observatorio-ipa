@@ -109,20 +109,20 @@ def _ee_monthly_stats_per_elev_basin(
 
     # -----------------------------------------------------------------------------------------------------------------------
     # SCI and CCI Correction
-    # ! INCONSISTENCY: round() was not applied as with original Month scripts
-    # ! INCONSISTENCY: Some scripts rename bands to SCA/CCA, others keep name as SCI/CCI
     # -----------------------------------------------------------------------------------------------------------------------
 
     ee_TACbyYearMonth_ic = (
         ee_icollection.map(
-            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CCA")
+            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CP")
         )
         .map(
             lambda ee_image: common._ee_correct_SCI_band(
-                ee_image, "Snow_TAC", "Cloud_TAC", "SCA"
+                ee_image, "Snow_TAC", "Cloud_TAC", "SP"
             )
         )
-        .select(["SCA", "CCA"])
+        .select(
+            ["SP", "CP"], ["SCA", "CCA"]
+        )  # Rename bands to SCA and CCA to keep below code as-is
     )
 
     # -----------------------------------------------------------------------------------------------------------------------
@@ -160,78 +160,12 @@ def _ee_monthly_stats_per_elev_basin(
         ee_SCAbyYear_elev_fc, ee_CCAbyYear_elev_fc, primary_key="YearMonthElev"
     )
 
-    #! Results SCA and CCA values were not formatted to 2 decimals
-    # ee_MergedByYear_elev_fc = common._ee_format_properties_2decimals(
-    #     ee_MergedByYear_elev_fc, properties=["SCA", "CCA"]
-    # )
+    # Round values to 2 digits
+    ee_MergedByYear_elev_fc = common._ee_format_properties_2decimals(
+        ee_MergedByYear_elev_fc, properties=["SCA", "CCA"]
+    )
 
     return ee_MergedByYear_elev_fc
-
-
-# def SCA_ym_elev_BNA(
-#     ee_icollection: ee.imagecollection.ImageCollection,
-#     ee_fcollection: ee.featurecollection.FeatureCollection,
-#     property: str,
-#     ee_dem_img: ee.image.Image,
-#     export_target: Literal["gdrive", "gee_assets"],
-#     img_prefix: str,  # "MCD_SCA_ym_elev_BNA_",
-#     export_path: str,  # "yearMonth_ee"
-#     max_exports: int | None = None,
-# ) -> list:
-#     """ """
-
-#     # Get all unique basin values and process each
-#     basin_code_list = ee_fcollection.aggregate_array(property).getInfo()
-#     if basin_code_list is None:
-#         basin_code_list = []
-
-#     if not max_exports:
-#         max_exports = len(basin_code_list)
-#     export_tasks = []
-#     for basin_code in basin_code_list:
-#         table_name = f"{img_prefix}{basin_code}"
-#         print(f"Processing basin: {basin_code}, table: {table_name}")
-#         try:
-#             ee_monthly_basin_elev_mean_fc = _ee_monthly_stats_per_elev_basin(
-#                 basin_code, property, ee_fcollection, ee_icollection, ee_dem_img
-#             )
-#             bands_of_interest = ['Date', 'Elevation', 'SCA', 'CCA']
-#             ee_monthly_basin_elev_mean_fc = ee_monthly_basin_elev_mean_fc.select(
-#                 bands_of_interest
-#             )  # Select only the relevant bands
-
-#             if export_target == "gdrive":
-#                 task = ee.batch.Export.table.toDrive(
-#                     collection=ee_monthly_basin_elev_mean_fc,
-#                     description=table_name,
-#                     folder=export_path,
-#                     fileNamePrefix=table_name,
-#                     selectors=bands_of_interest,
-#                     fileFormat="CSV",
-#                 )
-#             elif export_target == "gee_assets":
-#                 # Adding dummy geometry to avoid errors in export
-#                 ee_monthly_basin_elev_mean_fc = ee_monthly_basin_elev_mean_fc.map(
-#                     common._ee_assign_dummy_geom
-#                 )
-
-#                 task = ee.batch.Export.table.toAsset(
-#                     collection=ee_monthly_basin_elev_mean_fc,
-#                     description=table_name,
-#                     assetId=f"{export_path}/{table_name}",
-#                 )
-#             else:
-#                 raise ValueError(f"Invalid export target: {export_target}")
-
-#             export_tasks.append(task)
-#         except Exception as e:
-#             print(f"Error exporting {table_name}: {e}")
-#             continue
-#         finally:
-#             max_exports -= 1
-#             if max_exports == 0:
-#                 break
-#     return export_tasks
 
 
 # TODO: Fix Class name to meet Python conventions

@@ -44,21 +44,18 @@ def _ee_calc_ym_snowline_per_basin(
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # SCI and CCI Correction
-    # ! INCONSISTENCY: round() was not applied as with original Month scripts
-    # ! INCONSISTENCY: Some scripts rename bands to SCA/CCA, others keep name as SCI/CCI
-    # ! INCONSISTENCY: CCI CORRECTION FOR THIS SCRIPT IS DIFFERENT FROM ALL OTHERS (but basically does the same)
     # ------------------------------------------------------------------------------------------------------------------------------
 
     ee_TACbyYearMonth_ic = (
         ee_icollection.map(
-            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CCI")
+            lambda ee_image: common._ee_correct_CCI_band(ee_image, "Cloud_TAC", "CP")
         )
         .map(
             lambda ee_image: common._ee_correct_SCI_band(
-                ee_image, "Snow_TAC", "Cloud_TAC", "SCI"
+                ee_image, "Snow_TAC", "Cloud_TAC", "SP"
             )
         )
-        .select(["SCI", "CCI"])
+        .select(["SP", "CP"])
     )
 
     # ------------------------------------------------------------------------------------------------------------------------------
@@ -71,53 +68,35 @@ def _ee_calc_ym_snowline_per_basin(
             ee_image,
             ee_basin_fc,
             ee_dem_img,
-            band="SCI",
+            band="SP",
             snowline_threshold=snowline_threshold,
         )
     )
 
-    #! IMPORTANT: Results change if this select is not applied.
-    #! Note that SCI is never used but if removed all snowline_elev become None
-    #! Results also change if CCI is added to select
-    ee_snowline_elev_ic = ee_snowline_elev_ic.select(["Snowline_elev", "SCI"])
+    ee_snowline_elev_ic = ee_snowline_elev_ic.select(["Snowline_elev"])
 
     # ------------------------------------------------------------------------------------------------------------------------------
     # Calc region mean per basin per year
     # TODO: Consider using common._ee_calc_mean_per_region and separate adding Year property
     # ------------------------------------------------------------------------------------------------------------------------------
-    # def _ee_calc_ym_mean_per_basin(
-    #     ee_image: ee.image.Image,
-    #     ee_basin_fc: ee.featurecollection.FeatureCollection,
-    #     basin_property: str,
-    # ) -> ee.featurecollection.FeatureCollection:
-
-    #     ee_region_mean_fc = ee_image.reduceRegions(
-    #         collection=ee_basin_fc.select([basin_property]),
-    #         reducer=ee.reducer.Reducer.mean(),
-    #         scale=DEFAULT_SCALE,
-    #     )
-
-    #     def _ee_set_props(
-    #         ee_feature: ee.feature.Feature, ee_image: ee.image.Image
-    #     ) -> ee.feature.Feature:
-    #         ee_date_str = ee.ee_date.Date(ee_image.date()).format("YYYY-MM-dd")
-    #         return ee.feature.Feature(
-    #             ee_feature.set("imageId", ee_image.id())
-    #             .set("Year", ee_image.get("year"))
-    #             .set("Month", ee_image.get("month"))
-    #             .set("date", ee_image.date())
-    #             .set("Date", ee_date_str)
-    #         )
-
-    #     return ee_region_mean_fc.map(
-    #         lambda ee_feature: _ee_set_props(ee_feature, ee_image)
-    #     )
 
     ee_ym_snowline_per_basin_fc = ee_snowline_elev_ic.map(
         lambda ee_image: sca_y_m_bna._ee_calc_yearMonth_spatial_mean(
             ee_image, ee_basin_fc, basins_cd_property
         )
     ).flatten()
+
+    # Rename property mean to Snowline_elev
+    ee_ym_snowline_per_basin_fc = ee_ym_snowline_per_basin_fc.map(
+        lambda ee_feature: common._ee_copy_feature_property(
+            ee_feature, "mean", "Snowline_elev"
+        )
+    )
+
+    # Round values to 2 digits
+    ee_ym_snowline_per_basin_fc = common._ee_format_properties_2decimals(
+        ee_ym_snowline_per_basin_fc, properties=["Snowline_elev"]
+    )
 
     return ee_ym_snowline_per_basin_fc
 

@@ -1,0 +1,112 @@
+{% extends "_base.html" %}
+
+{% block title %}Export Details{% endblock title %}
+
+{% block content %}
+<section id="breadcrumb-section" class="mb-3">
+  <nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item">
+        <a class="fw-semibold text-decoration-none" href="{% url 'home' %}"><i class="bi bi-house-door-fill"></i> Home</a>
+      </li>
+      <li class="breadcrumb-item"><a class="fw-semibold text-decoration-none" href="{% url 'job_list' %}">Job List</a></li>
+      <li class="breadcrumb-item"><a class="fw-semibold text-decoration-none" href="{% url 'job_detail' export.job.id %}">Job</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Export</li>
+    </ol>
+  </nav>
+</section>
+  <h3>{{ export.get_type_display }}: <small class="text-body-secondary">{{ export.name }}
+      {% if export.state == "COMPLETED" %}
+      <span class="badge rounded-pill bg-success">{{ export.state }}</span>
+      {% elif export.state == "FAILED" %}
+      <span class="badge rounded-pill bg-danger">{{ export.state }}</span>
+      {% else %}
+      <span class="badge rounded-pill bg-secondary">{{ export.state }}</span>
+      {% endif %}
+      </small>
+  </h3>
+  <section>
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-xs flex-shrink-0">ID:</div>
+        <div class="data-field-value flex-grow-1">{{ export.id }}</div>
+      </div>
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-xs flex-shrink-0">Job ID:</div>
+        <div class="data-field-value flex-grow-1"><a class="fw-semibold text-decoration-none" href="{% url 'job_detail' export.job_id %}">{{ export.job_id }}</a></div>
+      </div>
+
+    {% if export.error %}
+      <div class="w-100 mb-2">
+        <div class="alert alert-danger p-2" role="alert">
+          <strong>Error:</strong> {{ export.error }}
+        </div>
+      </div>
+    {% endif %}
+  </section>
+    <hr>
+  <section id="gee-status-info" class="row mb-4">
+    <div class="col-md-6">
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-m flex-shrink-0">GEE Task Status:</div>
+        <div class="data-field-value flex-grow-1">{{ export.task_status }}</div>
+      </div>
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-m flex-shrink-0">GEE Task ID:</div>
+        <div class="data-field-value flex-grow-1">{{ export.task_id }}</div>
+      </div>
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-m flex-shrink-0">Target:</div>
+        <div class="data-field-value flex-grow-1">{{ export.get_target_display }}</div>
+      </div>
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-m flex-shrink-0">Path:</div>
+        <div class="data-field-value flex-grow-1">{{ export.path }}</div>
+      </div>
+
+    </div>
+    <div class="col-md-6">
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-m flex-shrink-0">Next Check at:</div>
+        <div class="data-field-value flex-grow-1">{{ export.next_check_at }}</div>
+      </div>
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-m flex-shrink-0">Created at:</div>
+        <div class="data-field-value flex-grow-1">{{ export.created_at }}</div>
+      </div>
+      <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="data-field-label-m flex-shrink-0">Updated at:</div>
+        <div class="data-field-value flex-grow-1">{{ export.updated_at }}</div>
+      </div>
+    </div>
+  </section>
+  {% if export.type != "image" %}
+  <section id="previous-file-information" class="mb-3 p-3 rounded bg-light">
+    <h4>Archive Information</h4>
+    {% if export.file_transfers %}
+
+      <table class="table table-sm">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Source Path</th>
+            <th>Destination Path</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if export.file_transfers %}
+            <tr>
+              <td>{{ export.file_transfers.status }}</td>
+              <td>{{ export.file_transfers.source_path }}</td>
+              <td>{{ export.file_transfers.destination_path }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3">No previous file information found.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No previous file information found.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+{% endblock content %}

@@ -166,7 +166,12 @@ def _make_job_report_context(
     return job_results
 
 
-def auto_job_report(session: Session, job_id: str, settings: EmailSettings) -> None:
+def auto_job_report(
+    session: Session,
+    job_id: str,
+    settings: EmailSettings,
+    frontend_url: str | None = None,
+) -> None:
     """
     Generate Job report for a completed job.
 
@@ -229,6 +234,11 @@ def auto_job_report(session: Session, job_id: str, settings: EmailSettings) -> N
 
     try:
         report_context = _make_job_report_context(session, job_id)
+        if frontend_url:
+            report_context["frontend_url"] = frontend_url.rstrip("/")
+        else:
+            report_context["frontend_url"] = None
+
         if settings.enable_email:
             email_service = email.EmailService(
                 host=settings.host,  # type: ignore

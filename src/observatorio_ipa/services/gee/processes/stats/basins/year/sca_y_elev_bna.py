@@ -92,8 +92,6 @@ def _ee_year_stats_per_elev_basin(
 
     # -----------------------------------------------------------------------------------------------------------------------
     # SCI and CCI Correction
-    #! INCONSISTENCY: Original JS did not apply round() in the correction while other scripts did
-    #! Names here are CP, SP while in other scripts they are CCI, SCI or CCA, SCA
     # -----------------------------------------------------------------------------------------------------------------------
 
     ee_TACbyYear_ic = (

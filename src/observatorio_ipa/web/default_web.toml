@@ -1,0 +1,23 @@
+[django]
+secret_key_file = "/run/secrets/django_secret_key.txt"
+debug = false
+allowed_hosts = []
+
+
+[default_db]
+type = "sqlite"
+db_path = "/app/db/"
+db_name = "web_db.sqlite3"
+# host = "db"
+# port = 5432
+# user_file = "/run/secrets/db_user.txt"
+# password_file = "/run/secrets/db_passwd.txt"
+
+[ipa_db]
+type = "sqlite"
+db_path = "/app/db/"
+db_name = "observatorio_ipa.sqlite3"
+# host = "db"
+# port = 5432
+# user_file = "/run/secrets/db_user.txt"
+# password_file = "/run/secrets/db_passwd.txt"
