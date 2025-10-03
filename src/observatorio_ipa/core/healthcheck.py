@@ -105,9 +105,10 @@ class HealthHandler(BaseHTTPRequestHandler):
             txt = hb.read_text(encoding="utf-8").strip()
             last_poll = datetime.fromisoformat(txt)
             age = int((now - last_poll).total_seconds())
-            if age > (poll_sec * 3):
+            max_missed_polls = 5
+            if age > (poll_sec * max_missed_polls):
                 logger.error(
-                    f"Healthcheck failed: last successful poll {age}s ago (> {poll_sec * 3}s)"
+                    f"Healthcheck failed: last successful poll {age}s ago (> {poll_sec * max_missed_polls}s)"
                 )
                 logger.error(f"Heartbeat file path: {hb.as_posix()}")
                 logger.error(f"Heartbeat last poll time: {last_poll.isoformat()}")
