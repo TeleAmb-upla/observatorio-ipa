@@ -1066,7 +1066,7 @@ def rollback_file_transfers(
         storage_conn (storage.Client): Google Cloud Storage client.
         storage_bucket (str): Name of the storage bucket.
     """
-    logger.debug(f"Rolling back file transfers for job {job_id}")
+    logger.debug(f" Verifying if file rollbacks are required")
     db_rollback = session.execute(
         select(
             Export.id.label("export_id"),
@@ -1084,10 +1084,11 @@ def rollback_file_transfers(
     ).all()
 
     if not db_rollback:
+        logger.debug(f"No file rollbacks required for job {job_id}")
         return
 
     bucket = storage_conn.bucket(storage_bucket)
-
+    logger.debug(f"Rolling back file transfers for job {job_id}")
     for file in db_rollback:
         original_source = file.source_path
         rollback_source = file.destination_path
