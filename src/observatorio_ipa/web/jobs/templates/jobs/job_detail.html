@@ -56,8 +56,13 @@
         <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
           <div class="data-field-label-s flex-shrink-0">Timezone:</div>
           <div class="data-field-value flex-grow-1">{{ job.timezone }}</div>
-      </div>
-  
+        </div>
+        {% if job.website_updates.pull_request_id %}
+        <div class="data-field d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div class="data-field-label-s flex-shrink-0">GitHub PR:</div>
+          <div class="data-field-value flex-grow-1"><a href="{{ job.website_updates.pull_request_url }}" target="_blank">{{ job.website_updates.pull_request_id }}</a></div>
+        </div>
+        {% endif %}
       </div>
     </div>
     {% if job.error %}
