@@ -10,6 +10,10 @@ from django.db import models
 from django.core.exceptions import ValidationError
 
 
+def make_uuid():
+    return str(uuid4())
+
+
 class Job(models.Model):
     JOB_STATUS_CHOICES = [
         ("RUNNING", "RUNNING"),
@@ -26,7 +30,7 @@ class Job(models.Model):
     id = models.CharField(
         primary_key=True,
         max_length=36,
-        default=lambda: str(uuid4()),
+        default=make_uuid,
         editable=False,
         verbose_name="Job",
     )
@@ -89,7 +93,7 @@ class Export(models.Model):
     id = models.CharField(
         primary_key=True,
         max_length=36,
-        default=lambda: str(uuid4()),
+        default=make_uuid,
         editable=False,
         verbose_name="Export",
     )
