@@ -79,9 +79,9 @@
       </div>
     </div>
   </section>
-
+  {% if export.type != "image" %}
   <section id="previous-file-information" class="mb-3 p-3 rounded bg-light">
-    <h4>Previous File Archive Information</h4>
+    <h4>Archive Information</h4>
     {% if export.file_transfers %}
 
       <table class="table table-sm">
@@ -108,4 +108,5 @@
       <p>No previous file information found.</p>
     {% endif %}
   </section>
+  {% endif %}
 {% endblock content %}
