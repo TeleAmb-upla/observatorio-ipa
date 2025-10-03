@@ -83,6 +83,28 @@ class JobDetailView(LoginRequiredMixin, DetailView):
         context["export_search_query"] = search_query
         context["exports_empty"] = exports_qs.count() == 0
 
+        # Export completion stats by type
+        # Export completion stats by type (dynamic, not hardcoded)
+        all_exports = self.object.exports.all()  # type: ignore
+        export_stats = []
+        export_types = all_exports.values_list("type", flat=True).distinct()
+        for export_type in export_types:
+            type_exports = all_exports.filter(type=export_type)
+            n_exports = type_exports.count()
+            n_completed = type_exports.exclude(state="RUNNING").count()
+            pct_completed = (
+                round((n_completed / n_exports) * 100) if n_exports > 0 else 0
+            )
+            export_stats.append(
+                {
+                    "type": export_type,
+                    "n_exports": n_exports,
+                    "n_completed": n_completed,
+                    "pct_completed": pct_completed,
+                }
+            )
+        context["export_completion_summary"] = export_stats
+
         # Split job.error by '|', strip whitespace, ignore empty
         error_str = getattr(self.object, "error", "")  # type: ignore
         if error_str:
