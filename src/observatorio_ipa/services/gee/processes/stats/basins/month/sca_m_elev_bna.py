@@ -144,7 +144,7 @@ def _ee_calc_month_stats_per_elev_bin(
             ee_image,
             ee_dem_img,
             ee_basin_fc,
-            input_band_name="Snow_mean",
+            input_band_name="Snow_TAC_mean",
             output_band_name="SCA",
         )
     ).flatten()
@@ -158,7 +158,7 @@ def _ee_calc_month_stats_per_elev_bin(
             ee_image,
             ee_dem_img,
             ee_basin_fc,
-            input_band_name="Cloud_mean",
+            input_band_name="Cloud_TAC_mean",
             output_band_name="CCA",
         )
     ).flatten()
