@@ -1,6 +1,6 @@
 # Image Processing Automation for Observatorio Satelital de Nieve - OSN
 
-Automated Image processing for [Observatorio Satelital de Nieve (OSN)](https://observatorionieves.cl/). This project aims to monitor snow cover in Chile using satellite imagery. The project is developed by the Research team in Universidad de Playa Ancha, Valparaiso, Chile.
+Automated Image processing for [Observatorio Satelital de Nieve (OSN)](https://observatorionieves.cl/). This project aims to monitor snow coverage in Chile using satellite imagery. The project is developed by the Research team in Universidad de Playa Ancha, Valparaiso, Chile.
 
 ## Installation
 
