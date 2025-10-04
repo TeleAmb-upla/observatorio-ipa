@@ -46,7 +46,7 @@ logger = logging.getLogger(LOGGER_NAME)
 
 DEFAULT_POLLING_INTERVAL_SEC = 15
 LEASE_SECONDS = 60
-MAX_BATCH_SIZE = 20  #! Check GEE to see max rate
+MAX_BATCH_SIZE = 50  #! Check GEE to see max rate
 
 DB_TASK_STATUS_MAP = {
     "PENDING": "RUNNING",

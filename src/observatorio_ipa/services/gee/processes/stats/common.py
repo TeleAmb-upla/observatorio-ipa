@@ -326,15 +326,25 @@ def _ee_format_properties_2decimals(
     def _format_feature(ee_feature):
         def _format_prop(prop, prev):
             prev = ee.dictionary.Dictionary(prev)
-            # value = ee.ee_number.Number(ee_feature.get(prop))
+
+            # Check if property exists
             value = ee_feature.get(prop)
-            # Check if value is not None/null and is a number
-            # isNumber = ee.Algorithms.IsEqual(ee.Algorithms.ObjectType(value), "Number")
-            formatted_value = ee.Algorithms.If(
-                value, ee.ee_number.Number(value).format("%.2f"), value
+
+            # Check for Null types
+            value = ee.Algorithms.If(
+                ee.Algorithms.IsEqual(value, "null"),
+                None,
+                value,
             )
-            # return prev.set(prop, value.format("%.2f"))
-            return prev.set(prop, formatted_value)
+
+            # Only set the property if it exists and is not None/null
+            new_dict = ee.Algorithms.If(
+                ee.Algorithms.IsEqual(value, None),
+                prev,
+                prev.set(prop, ee.ee_number.Number(value).format("%.2f")),
+            )
+
+            return new_dict
 
         # Use iterate to apply formatting to all properties
         formatted_props = ee_property_list.iterate(

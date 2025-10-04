@@ -79,12 +79,12 @@ def _job_create(settings: Settings, session_maker: sessionmaker) -> None:
 
 def _job_poll(settings: Settings, session_maker: sessionmaker) -> None:
     logger.info("poll_and_orchestrate: start")
-    with session_maker() as session:
-        auto_orchestration(settings, session)
     write_poll_heartbeat(
         heartbeat_file=settings.app.automation.heartbeat.heartbeat_file,
         timezone=settings.app.automation.timezone,
     )
+    with session_maker() as session:
+        auto_orchestration(settings, session)
     logger.info("poll_and_orchestrate: end")
 
 

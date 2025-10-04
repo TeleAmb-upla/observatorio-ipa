@@ -26,7 +26,7 @@ def _ee_calc_snowline_elev(
     """
     # CHANGES:
     # - Added selfMask() to ee_snowline_01_img to assure reduceToVectors focuses on the "good" pixels
-    # - Eliminated step of ee_snowline_02_img, since it's redundant, snowline pixels are alrady in 0/1 values
+    # - Eliminated step of ee_snowline_02_img, since it's redundant, snowline pixels are already in 0/1 values
     # - Added bestEffort to reduceToVectors to improve performance and results
     # - Added geometryInNativeProjection to reduceToVectors to preserve projection
     # - Added eightConnected to reduceToVectors to connect diagonal points
