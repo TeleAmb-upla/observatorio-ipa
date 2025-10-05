@@ -625,67 +625,35 @@ def update_job(session: Session, job_id: str) -> None:
     if not website_job:
         return
 
-    match website_job.status:
-        case "PENDING" | "RUNNING":
-            if website_job.status != job.website_update_status:
-                # Update status in Job
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(website_update_status=website_job.status, updated_at=now)
-                )
-                session.commit()
-                return
-            else:
-                # Still running, do nothing
-                return
-
-        case "COMPLETED":
-            if website_job.status != job.website_update_status:
-                # Update status in Job
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(website_update_status=website_job.status, updated_at=now)
-                )
-                session.commit()
-                return
-            else:
-                # Completed, move on to Job Status Update
-                pass
-
-        case "FAILED":
-            if website_job.status != job.website_update_status:
-                # Update status in Job
-                error_message = _join_error_msgs(
-                    job.error,
-                    website_job.last_error,
-                )
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(
-                        website_update_status=website_job.status,
-                        error=error_message,
-                        updated_at=now,
-                    )
-                )
-                session.commit()
-                return
-            else:
-                # Completed, move on to Job Status Update
-                pass
-
-        case _:
-            # Not Normal: Unknown state: Set as failed
-            error_message = "Program produced an abnormal state while running Website update procedure."
-            session.execute(
-                update(WebsiteUpdate)
-                .where(WebsiteUpdate.job_id == job_id)
-                .values(status="FAILED", last_error=error_message, updated_at=now)
+    # If website and Job status don't match, update.
+    if website_job.status != job.website_update_status:
+        if website_job.status == "FAILED":
+            error_message = _join_error_msgs(
+                job.error,
+                website_job.last_error,
             )
-            session.commit()
-            return
+        else:
+            error_message = job.error
+
+        # Update status in Job
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(
+                website_update_status=website_job.status,
+                error=error_message,
+                updated_at=now,
+            )
+        )
+        session.commit()
+        return
+
+    if website_job.status in ("PENDING", "RUNNING"):
+        # Still running, do nothing
+        return
+    else:
+        # Completed, move on to Job Status Update
+        pass
 
     # -------------- JOB_STATUS --------------
     # Sanity check in case I missed something above
@@ -723,6 +691,7 @@ def update_job(session: Session, job_id: str) -> None:
             return
 
         case "FAILED" | "COMPLETED":
+            # Alredy Finished, Do Nothing
             return
 
         case _:
@@ -933,6 +902,7 @@ def update_task_status(session: Session, db_task: Export) -> None:
 
 
 # ALCHEMY DONE
+# TODO: Switch to Archive file from Website rep. More accurate in case stats were generated outside of automated scripts
 def record_file_transfers(
     session: Session,
     job_id: str,
@@ -948,66 +918,71 @@ def record_file_transfers(
     Args:
         session (Session): Session object for the database.
         job_id (str): The ID of the job.
-        export_id (str): The ID of the export.
-        files (list): List of file paths (str or Path).
+        export_tasks (ExportTaskList): List of ExportTask objects.
         base_export_path (str | Path): The base path in storage.
+        storage_conn (storage.Client): Google Cloud Storage client.
+        storage_bucket (str): Name of the storage bucket.
     """
     now = utils_dates.tz_now()
     base_export_path = Path(base_export_path)
     for task in export_tasks:
-        file = Path(task.path, task.name)
         export_id = task.id
+        file = Path(task.path, task.name)
+        file_stem = file.stem
+        file_suffix = file.suffix
+
         # Compute relative path to base_export_path
         try:
             rel_path = file.relative_to(base_export_path)
         except ValueError:
             rel_path = file.name  # fallback: just the file name
 
-        # Determine bucket and storage client from settings or arguments
-        # For this function, expect storage_conn and storage_bucket in settings or as globals
-        # We'll try to get them from globals if not passed
-        bucket = storage_conn.bucket(storage_bucket)
-
-        # 1. Check if the non-archived file exists in the bucket
-        active_blob_path = file.as_posix()
-        active_blob = bucket.blob(active_blob_path)
-        if active_blob.exists():
-            # set origin and target files as the same
-            session.execute(
-                insert(FileTransfer).values(
-                    job_id=job_id,
-                    export_id=export_id,
-                    source_path=file.as_posix(),
-                    destination_path=file.as_posix(),
-                    status="NOT_MOVED",
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            session.commit()
-            continue
-
-        # 2. Try today's archive file (file_LUYYYYMMDD.csv)
-        today_str = date.today().strftime("%Y%m%d")
+        # Try looking in Archive sub-folders, if not, try directly in Archive folder
         archive_dir = (
             base_export_path / "archive" / rel_path.parent
             if isinstance(rel_path, Path)
             else base_export_path / "archive"
         )
-        archive_stem = file.stem
-        archive_suffix = file.suffix
-        archive_file_name = f"{archive_stem}_LU{today_str}{archive_suffix}"
-        archive_blob_path = (archive_dir / archive_file_name).as_posix()
+
+        bucket = storage_conn.bucket(storage_bucket)
+
+        # 1. Check if the non-archived file exists in the bucket
+        #! REMOVING. Some exports are completed by the time this runs so removing to avoid false positives.
+        # active_blob_path = file.as_posix()
+        # active_blob = bucket.blob(active_blob_path)
+        # if active_blob.exists():
+        #     # set origin and target files as the same
+        #     session.execute(
+        #         insert(FileTransfer).values(
+        #             job_id=job_id,
+        #             export_id=export_id,
+        #             source_path=file.as_posix(),
+        #             destination_path=file.as_posix(),
+        #             status="NOT_MOVED",
+        #             created_at=now,
+        #             updated_at=now,
+        #         )
+        #     )
+        #     session.commit()
+        #     continue
+
+        # 2. Try "today's" archive file (file_LUYYYYMMDD.csv)
+        today_str = date.today().strftime("%Y%m%d")
+        archive_file_name = f"{file_stem}_LU{today_str}{file_suffix}"
+        archive_blob_path = (
+            archive_dir / archive_file_name
+        ).as_posix()  # Full path to archived file
         archive_blob = bucket.blob(archive_blob_path)
         if archive_blob.exists():
             # Insert mapping into DB
+            # Flagging as MOVED but it could very well be an old file and not the most recent moved file
             session.execute(
                 insert(FileTransfer).values(
                     job_id=job_id,
                     export_id=export_id,
                     source_path=file.as_posix(),
                     destination_path=archive_blob_path,
-                    status="MOVED",
+                    status="HAS_ARCHIVE",
                     created_at=now,
                     updated_at=now,
                 )
@@ -1016,12 +991,11 @@ def record_file_transfers(
             continue
 
         # 3. If not found, list all files in archive dir matching file_LU*.csv and pick newest
-        prefix = (archive_dir / f"{archive_stem}_LU").as_posix()
         # List blobs in archive_dir
         blobs = list(bucket.list_blobs(prefix=archive_dir.as_posix() + "/"))
         # Filter for files matching file_LUYYYYMMDD.csv
         pattern = re.compile(
-            rf"{re.escape(archive_stem)}_LU(\\d{{8}}){re.escape(archive_suffix)}$"
+            rf"{re.escape(file_stem)}_LU(\\d{{8}}){re.escape(file_suffix)}$"
         )
         candidates = []
         for blob in blobs:
@@ -1039,13 +1013,26 @@ def record_file_transfers(
                     export_id=export_id,
                     source_path=file.as_posix(),
                     destination_path=newest_archived_file,
-                    status="MOVED",
+                    status="HAS_ARCHIVE",
                     created_at=now,
                     updated_at=now,
                 )
             )
             session.commit()
-    session.commit()
+        else:
+            # If no archive file found, just save with status "NO_ARCHIVE"
+            session.execute(
+                insert(FileTransfer).values(
+                    job_id=job_id,
+                    export_id=export_id,
+                    source_path=file.as_posix(),
+                    destination_path="",
+                    status="NO_ARCHIVE",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.commit()
     return
 
 
@@ -1079,7 +1066,7 @@ def rollback_file_transfers(
         .where(
             Export.job_id == job_id,
             Export.state == "FAILED",
-            FileTransfer.status == "MOVED",
+            FileTransfer.status == "HAS_ARCHIVE",
         )
     ).all()
 
@@ -1272,6 +1259,7 @@ def auto_stats_export(
         return
 
     # skip if no images were exported or all failed
+    # TODO: Review logic. Stats should run without the need of new images.
     elif not completed_images:
         logger.debug("Skipping stats export - No images exported or all failed")
         session.execute(
@@ -1283,6 +1271,12 @@ def auto_stats_export(
         return
     else:
         logger.debug(f"Starting stats export procedure")
+        # Set to Stats status to running
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(stats_export_status="RUNNING", updated_at=now)
+        )
 
     try:
 
@@ -1297,7 +1291,7 @@ def auto_stats_export(
         )
 
     except Exception as e:
-        # Mark Job as FAILED if stats export doesn't complete
+        # Mark Stats as FAILED if any errors occur
         logger.error(f"Error executing stats export process: {e}")
         error_msg = _join_error_msgs(job.error, str(e))
         session.execute(
@@ -1312,26 +1306,28 @@ def auto_stats_export(
         session.commit()
         return
 
+    # If no exports where created flag as COMPLETED
     if len(stats_export_tasks) == 0:
-        stats_export_status = "COMPLETED"
-        logger.info("No stats exports generated for this job")
-    else:
-        stats_export_status = "RUNNING"
-        logger.info(f"Generated {len(stats_export_tasks)} stats export tasks")
-
-    logger.debug(f"Updating stats export status to {stats_export_status}")
-    session.execute(
-        update(Job)
-        .where(Job.id == job_id)
-        .values(
-            stats_export_status=stats_export_status,
-            updated_at=utils_dates.tz_now(),
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(
+                stats_export_status="COMPLETED",
+                updated_at=utils_dates.tz_now(),
+            )
         )
-    )
-    session.commit()
+        session.commit()
+        logger.info("No stats exports generated for this job")
+        logger.debug(f"Updating stats export status to COMPLETED")
+
+    else:
+        logger.info(f"Generated {len(stats_export_tasks)} stats export tasks")
 
     if stats_export_tasks:
         #  ----- SAVE TASKS TO DB -----
+        # Stats export process focuses on creating export tasks and is independent from
+        # DB interactions and automation so records are added to the DB here, after export
+        # tasks are  created.
         logger.debug(
             f"Saving {len(stats_export_tasks)} stats export tasks into database."
         )
@@ -1523,6 +1519,7 @@ def auto_job_orchestration(
                 return
 
             case "COMPLETED" | "FAILED":
+                # Double check no pending stat tasks still running
                 running_stats_exports = session.scalars(
                     select(Export).where(
                         Export.job_id == job.id,
@@ -1536,10 +1533,11 @@ def auto_job_orchestration(
                     return
 
                 else:
-                    # Finished Stats. Check for file rollbacks and attempt Website Update
+                    # Finished Stats. Check for FAILURES and attempt file rollbacks
                     # ----- STATS ROLLBACK -----
                     if storage_conn and settings.app.stats_export.storage_bucket:
                         try:
+                            # Rolls back files for any FAILED stats exports
                             rollback_file_transfers(
                                 session=session,
                                 job_id=job.id,

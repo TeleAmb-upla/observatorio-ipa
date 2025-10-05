@@ -141,8 +141,8 @@ class Export(models.Model):
 
 class FileTransfer(models.Model):
     TRANSFER_STATUS_CHOICES = [
-        ("MOVED", "Moved"),
-        ("NOT_MOVED", "Not Moved"),
+        ("HAS_ARCHIVE", "Has Archive"),
+        ("NO_ARCHIVE", "No Archive"),
         ("ROLLED_BACK", "Rolled Back"),
     ]
 
@@ -170,6 +170,7 @@ class WebsiteUpdate(models.Model):
         ("PENDING", "Pending"),
         ("COMPLETED", "Completed"),
         ("FAILED", "Failed"),
+        ("SKIPPED", "Skipped"),
     ]
     id = models.AutoField(primary_key=True)
     job = models.OneToOneField(

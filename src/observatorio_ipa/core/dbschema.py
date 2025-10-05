@@ -20,7 +20,7 @@ class Base(DeclarativeBase):
 # Job Status: RUNNING, COMPLETED, FAILED
 # Image Export Status: PENDING, RUNNING, COMPLETED, FAILED
 # Stats Export Status: PENDING, RUNNING, COMPLETED, FAILED
-# Website Update Status: PENDING, COMPLETED, FAILED
+# Website Update Status: PENDING, COMPLETED, FAILED, SKIPPED
 # Report Status: SKIP, PENDING, COMPLETED, FAILED
 
 
@@ -175,7 +175,7 @@ class WebsiteUpdate(Base):
         return f"<WebsiteUpdate(id={self.id}, job_id={self.job_id}, status={self.status}, pull_request_id={self.pull_request_id}, pull_request_url={self.pull_request_url}, attempts={self.attempts}, last_error={self.last_error}, updated_at={self.updated_at})>"
 
 
-# File Transfer Status: MOVED, NOT_MOVED, ROLLED_BACK
+# File Transfer Status: HAS_ARCHIVE, NO_ARCHIVE, ROLLED_BACK
 class FileTransfer(Base):
     __tablename__ = "file_transfers"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

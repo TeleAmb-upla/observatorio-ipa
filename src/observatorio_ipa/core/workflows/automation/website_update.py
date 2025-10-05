@@ -467,7 +467,7 @@ def auto_website_update(session: Session, job_id: str, settings: Settings) -> No
         print("Stats export not completed. Exiting.")
         return
 
-    # verify no running stats exports
+    # Double check no running stats exports
     running_stats_exports = session.scalars(
         select(Export).where(
             Export.job_id == job.id, Export.type == "table", Export.state == "RUNNING"
@@ -479,8 +479,7 @@ def auto_website_update(session: Session, job_id: str, settings: Settings) -> No
         print("Stats exports still running. Exiting.")
         return
 
-    # Create Website Update Task if first run
-    # Get or Create Website Update Task
+    # Get Website Update Task. Create if first run.
     db_website = session.scalars(
         select(WebsiteUpdate).where(WebsiteUpdate.job_id == job_id)
     ).first()
@@ -501,6 +500,21 @@ def auto_website_update(session: Session, job_id: str, settings: Settings) -> No
             select(WebsiteUpdate).where(WebsiteUpdate.job_id == job_id)
         ).first()
 
+    # If Stats exports failed. DO NOT UPDATE WEBSITE
+    if job.stats_export_status == "FAILED":
+        session.execute(
+            update(WebsiteUpdate)
+            .where(WebsiteUpdate.job_id == job_id)
+            .values(
+                status="SKIPPED",
+                updated_at=tz_now(),
+            )
+        )
+        session.commit()
+        logger.warning("Stats export failed. Website update will not proceed.")
+        print("Stats export failed. Website update will not proceed.")
+        return
+
     # Get list of files to replace from DB
     db_stats_tasks = session.scalars(
         select(Export).where(
@@ -515,13 +529,14 @@ def auto_website_update(session: Session, job_id: str, settings: Settings) -> No
             update(WebsiteUpdate)
             .where(WebsiteUpdate.job_id == job_id)
             .values(
-                status="COMPLETED",
+                status="SKIPPED",
                 updated_at=tz_now(),
             )
         )
         session.commit()
-        logger.info("No files to replace. Exiting.")
-        print("No files to replace. Exiting.")
+        msg = "No files to replace. Skipping Website update."
+        logger.info(msg)
+        print(msg)
         return
 
     try:
