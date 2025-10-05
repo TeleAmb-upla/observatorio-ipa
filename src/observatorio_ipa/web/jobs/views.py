@@ -10,6 +10,9 @@ from .tables import JobsTable, ExportsTable
 from .filters import RunningJobsFilter
 
 
+PAGINATION_SIZES = [10, 25, 50, 100]
+
+
 class RunningJobsListView(LoginRequiredMixin, SingleTableMixin, ListView):
     model = Job
     table_class = JobsTable
@@ -47,10 +50,13 @@ class JobListView(LoginRequiredMixin, SingleTableMixin, ListView):
         queryset = super().get_queryset().order_by("-created_at")
         search_query = self.request.GET.get("job_search", "").strip()
         created_at_query = self.request.GET.get("job_created_at", "").strip()
+        job_status_selected = self.request.GET.get("job_status", "").strip()
         if search_query:
             queryset = queryset.filter(Q(id__icontains=search_query))
         if created_at_query:
             queryset = queryset.filter(created_at__date=created_at_query)
+        if job_status_selected:
+            queryset = queryset.filter(job_status=job_status_selected)
         return queryset
 
     def get_context_data(self, **kwargs):
@@ -59,6 +65,9 @@ class JobListView(LoginRequiredMixin, SingleTableMixin, ListView):
         context["job_created_at_query"] = self.request.GET.get(
             "job_created_at", ""
         ).strip()
+        context["job_status_selected"] = self.request.GET.get("job_status", "").strip()
+        # Provide all possible job status choices for the dropdown
+        context["job_status_choices"] = ["COMPLETED", "FAILED", "RUNNING"]
         return context
 
 
@@ -70,22 +79,46 @@ class JobDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        # Searchbar for exports
+        # Export search and filters
         search_query = self.request.GET.get("export_search", "").strip()
+        status_filter = self.request.GET.get("export_status", "").strip()
+        type_filter = self.request.GET.get("export_type", "").strip()
+        per_page = self.request.GET.get("per_page", "10")
+        try:
+            per_page = int(per_page)
+        except ValueError:
+            per_page = 10
+
         exports_qs = self.object.exports.all()  # type: ignore
         if search_query:
             exports_qs = exports_qs.filter(
                 Q(id__icontains=search_query) | Q(name__icontains=search_query)
             )
+        if status_filter:
+            exports_qs = exports_qs.filter(state=status_filter)
+        if type_filter:
+            exports_qs = exports_qs.filter(type=type_filter)
+
         table = ExportsTable(exports_qs)
-        RequestConfig(self.request, paginate={"per_page": 10}).configure(table)  # type: ignore
+        RequestConfig(self.request, paginate={"per_page": per_page}).configure(table)  # type: ignore
         context["exports_table"] = table
         context["export_search_query"] = search_query
         context["exports_empty"] = exports_qs.count() == 0
+        context["export_status_selected"] = status_filter
+        context["export_type_selected"] = type_filter
+        context["per_page"] = per_page
+        context["per_page_choices"] = PAGINATION_SIZES
 
-        # Export completion stats by type
-        # Export completion stats by type (dynamic, not hardcoded)
+        # Choices for dropdowns (from all exports for this job)
         all_exports = self.object.exports.all()  # type: ignore
+        context["export_status_choices"] = list(
+            all_exports.values_list("state", flat=True).distinct()
+        )
+        context["export_type_choices"] = list(
+            all_exports.values_list("type", flat=True).distinct()
+        )
+
+        # Export completion stats by type (dynamic, not hardcoded)
         export_stats = []
         export_types = all_exports.values_list("type", flat=True).distinct()
         for export_type in export_types:
