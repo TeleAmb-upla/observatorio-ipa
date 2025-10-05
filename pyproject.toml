@@ -1,6 +1,6 @@
 [project]
 name = "observatorio-ipa"
-version = "0.3.3"
+version = "0.4.0"
 description = "Image Processing Automation for Observatorio Satelital de nieves (OSN)"
 
 authors = [
@@ -39,7 +39,7 @@ classifiers = [
 ]
 
 [tool.webapp]
-version = "0.2.1"
+version = "0.3.0"
 
 [project.urls]
 homepage = "https://github.com/TeleAmb-upla/nieves_auto"
@@ -72,7 +72,7 @@ ipa = [
     "arrow>=1.3.0,<2.0.0",
     "cryptography>=45.0,<46.0",
     "earthengine-api>=1.4.1,<2.0",
-    "gee-toolbox (==0.2.*)",
+    "gee-toolbox==0.2.*",
     "gitpython>=3.1,<4.0",
     "jinja2>=3.1,<4.0",
     "prettytable>=3.16.0,<4.0.0",
