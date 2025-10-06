@@ -170,3 +170,4 @@ manifests/
 **/staticfiles/
 *.sqlite3
 *.log
+heartbeat/

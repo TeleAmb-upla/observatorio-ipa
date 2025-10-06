@@ -5,8 +5,6 @@ Series ImageCollection with yearly images per area of interest (basin)
 Adapted from the JavaScript implementation at users/observatorionieves/modules/Estadistica/Cuencas/Year/SCA_y_BNA.
 """
 
-# TODO Create a new function for copying properties in a feature collection to reduce the map verbosity
-
 import ee
 from typing import Literal
 from observatorio_ipa.core.defaults import DEFAULT_SCALE

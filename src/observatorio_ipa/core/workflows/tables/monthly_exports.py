@@ -1,12 +1,22 @@
 # Rollback helper: record file transfers for rollback
-import re, json, logging
-import pytz
+import re
+import logging
 from pathlib import Path
-from datetime import datetime, date
+from datetime import date
 import ee
 from gee_toolbox.gee import assets
-from google.cloud import storage
+from observatorio_ipa.core.workflows.tables.common import (
+    _ee_mask_geometry,
+    _ee_masked_dem,
+)
+from observatorio_ipa.core.workflows.tables.manifest import (
+    compare_manifest_to_collection,
+    create_manifest,
+    get_manifest,
+    save_manifest,
+)
 from observatorio_ipa.services.gee.exports import ExportTaskList
+from observatorio_ipa.services.storage.assets import _task_move_and_rename
 from observatorio_ipa.utils import db
 from observatorio_ipa.core.config import LOGGER_NAME
 from observatorio_ipa.core.workflows.images.monthly_export import _fix_name_prefix
@@ -69,406 +79,6 @@ def _get_imgs_in_monthly_ic(
     return exported_images
 
 
-# Manifest Functions
-
-
-def create_manifest(
-    images: list[str], collection_path: str | Path, meta: dict = {}
-) -> str:
-    collection_path = Path(collection_path)
-    images.sort()
-
-    manifest = {
-        "date_created": datetime.now(tz=pytz.UTC).isoformat(),
-        "metadata": meta,
-        "source": {
-            "image_collection": collection_path.as_posix(),
-            "first_image": images[0] if images else None,
-            "last_image": images[-1] if images else None,
-            "images": images,
-        },
-    }
-
-    manifest_json = json.dumps(manifest, indent=2)
-
-    # manifest_path = f"{image_collection_path}/monthly_manifest.json"
-    # with open(manifest_path, "w") as f:
-    #     json.dump(manifest, f)
-    return manifest_json
-
-
-def save_manifest_to_file(
-    manifest_json: str,
-    manifest_path: str | Path,
-    manifest_name: str,
-    overwrite: bool = False,
-) -> None:
-    full_manifest_path = Path(manifest_path, manifest_name)
-    if full_manifest_path.exists():
-        if overwrite:
-            full_manifest_path.unlink(missing_ok=True)
-        else:
-            raise FileExistsError(f"File {full_manifest_path} already exists.")
-    with open(full_manifest_path, "w") as f:
-        f.write(manifest_json)
-
-
-def save_manifest_to_storage(
-    manifest_json: str,
-    manifest_path: str | Path,
-    manifest_name: str,
-    storage_conn: storage.Client,
-    storage_bucket: str,
-    overwrite: bool = False,
-) -> None:
-    full_path = Path(manifest_path, manifest_name)
-    bucket = storage_conn.bucket(storage_bucket)
-    blob = bucket.blob(full_path.as_posix())
-
-    if blob.exists():
-        if overwrite:
-            blob.delete()
-        else:
-            raise FileExistsError(
-                f"Blob {full_path.as_posix()} already exists in bucket {storage_bucket}."
-            )
-    blob.upload_from_string(manifest_json)
-
-
-def save_manifest(
-    target: str,
-    manifest_path: str | Path,
-    manifest_name: str,
-    manifest_json: str,
-    storage_conn: storage.Client | None,
-    storage_bucket: str | None,
-    overwrite: bool = False,
-) -> None:
-
-    match target:
-        case "storage":
-            if not storage_conn or not storage_bucket:
-                raise ValueError(
-                    "Storage client and bucket name must be provided for storage target."
-                )
-            return save_manifest_to_storage(
-                manifest_json,
-                manifest_path,
-                manifest_name,
-                storage_conn,
-                storage_bucket,
-                overwrite,
-            )
-
-        case "file":
-            return save_manifest_to_file(
-                manifest_json, manifest_path, manifest_name, overwrite
-            )
-        case _:
-            raise ValueError(f"Unknown stats_export_target: {target}:{manifest_path}")
-
-
-def read_manifest_from_file(manifest_path: str | Path, manifest_name: str) -> dict:
-    full_manifest_path = Path(manifest_path, manifest_name)
-    with open(full_manifest_path, "r") as f:
-        manifest = json.load(f)
-    return manifest
-
-
-def read_manifest_from_storage(
-    storage_conn: storage.Client,
-    storage_bucket: str,
-    manifest_path: str | Path,
-    name: str,
-    overwrite: bool = False,
-) -> dict:
-    full_path = Path(manifest_path, name)
-    try:
-        bucket = storage_conn.bucket(storage_bucket)
-        blob = bucket.blob(full_path.as_posix())
-        manifest_json = blob.download_as_text()
-        return json.loads(manifest_json)
-    except Exception as e:
-        logger.warning(f"Error reading manifest from storage: {e}")
-        return {}
-
-
-def get_manifest(
-    source: str,
-    manifest_path: str | Path,
-    manifest_name: str,
-    storage_conn: storage.Client | None,
-    storage_bucket: str | None,
-) -> dict:
-    manifest_path = Path(manifest_path)
-    match source:
-        case "storage":
-            if not storage_conn or not storage_bucket:
-                raise ValueError(
-                    "Storage client and bucket name must be provided for storage source."
-                )
-            return read_manifest_from_storage(
-                storage_conn, storage_bucket, manifest_path, manifest_name
-            )
-
-        case "file":
-            return read_manifest_from_file(manifest_path, manifest_name)
-        case _:
-            raise ValueError(f"Unknown stats_export_target: {source}:{manifest_path}")
-
-
-def compare_manifest_to_collection(
-    manifest_src: str,
-    manifest_path: str | Path,
-    manifest_name: str,
-    collection_path: str | Path,
-    image_prefix: str,
-    storage_conn: storage.Client | None = None,
-    storage_bucket: str | None = None,
-) -> bool:
-    """Compares collection and image list from manifest to another collection and image list
-
-    Returns True if information in manifest is the same as new collection
-
-    args:
-        manifest_src (str): Source of the manifest. One of 'file', 'storage'
-        manifest_path (str | Path): Path to the manifest file or folder in storage
-        manifest_name (str): Name of the manifest file
-        collection_path (str | Path): Path to the collection folder
-        image_prefix (str): Prefix for the image files
-        storage_conn (storage.Client | None): Storage client if using storage source
-        storage_bucket (str | None): Storage bucket name if using storage source
-    returns:
-        bool: True if manifest matches collection, False otherwise
-    """
-
-    manifest_path = Path(manifest_path)
-    collection_path = Path(collection_path)
-
-    # Get List of Images from Collection
-    image_prefix = _fix_name_prefix(image_prefix)
-
-    collection_images = _get_imgs_in_monthly_ic(
-        monthly_collection_path=collection_path,
-        name_prefix=image_prefix,
-    )
-
-    # Get list of images in the manifest
-    try:
-        manifest = get_manifest(
-            manifest_src, manifest_path, manifest_name, storage_conn, storage_bucket
-        )
-    except Exception as e:
-        logger.warning(f"Error reading manifest: {e}")
-        manifest = {}
-
-    manifest_collection_path = Path(manifest.get("image_collection", ""))
-    manifest_images: list = manifest.get("images", [])
-
-    return (
-        collection_path == manifest_collection_path
-        and collection_images.sort() == manifest_images.sort()
-    )
-
-
-# Storage functions
-
-
-def create_storage_client(project, credentials):
-    """Creates a Google Cloud Storage client."""
-    return storage.Client(project=project, credentials=credentials)
-
-
-def date_stamp_file(file: str | Path) -> Path:
-    file = Path(file)
-    lu = date.today().strftime("%Y%m%d")
-    return file.parent / f"{file.stem}_LU{lu}{file.suffix}"
-
-
-def _get_files(
-    files_path: str | Path, storage_conn: storage.Client, storage_bucket: str
-) -> list[Path]:
-    files_path = Path(files_path)
-    prefix = files_path.as_posix() + "/"
-    len_prefix = len(prefix)
-    bucket = storage_conn.bucket(storage_bucket)
-    blobs = bucket.list_blobs(prefix=prefix, delimiter="/")
-
-    # Exclude Folders. Folders should end with "/" on account of delimiter="/"
-    list_of_files = []
-    for blob in blobs:
-        relative_path = blob.name[len_prefix:]
-        if relative_path and "/" not in relative_path:
-            list_of_files.append(Path(relative_path))
-    return list_of_files
-
-
-def _rename_files(
-    files: list[str] | list[Path],
-    files_path: str | Path,
-    storage_conn: storage.Client,
-    storage_bucket: str,
-) -> list[dict]:
-    files_ = [Path(f) for f in files]
-    renamed_files = [
-        {"name": f, "new_name": date_stamp_file(f), "succeeded": False} for f in files_
-    ]
-
-    bucket = storage_conn.bucket(storage_bucket)
-    for item in renamed_files:
-        try:
-            full_item_name = Path(files_path, item["name"]).as_posix()
-            full_item_new_name = Path(files_path, item["new_name"]).as_posix()
-            blob = bucket.blob(full_item_name)
-            new_blob = bucket.rename_blob(blob, full_item_new_name)
-            item["succeeded"] = True
-            print(f"Renamed {item['name']} to {new_blob.name}")
-        except Exception as e:
-            print(e)
-            pass
-
-    return renamed_files
-
-
-def _move_files(
-    files: list[str] | list[Path],
-    src_path: str | Path,
-    dest_path: str | Path,
-    storage_conn: storage.Client,
-    storage_bucket: str,
-    overwrite: bool = False,
-):
-    files_ = [{"name": Path(f), "succeeded": False} for f in files]
-    src_path_ = Path(src_path)
-    dest_path_ = Path(dest_path)
-    bucket = storage_conn.bucket(storage_bucket)
-    for file in files_:
-        src_file_name = Path(src_path_, file["name"]).as_posix()
-        dest_file_name = Path(dest_path_, file["name"]).as_posix()
-
-        src_blob = bucket.blob(src_file_name)
-        dest_blob = bucket.blob(dest_file_name)
-        if dest_blob.exists():
-            if overwrite:
-                dest_blob.delete()
-            else:
-                raise FileExistsError(
-                    f"File {dest_file_name} already exists in bucket {storage_bucket}."
-                )
-
-        try:
-            dest_blob = bucket.copy_blob(src_blob, bucket, dest_file_name)
-            src_blob.delete()
-            file["succeeded"] = True
-            print(f"Moved {file['name']} to {dest_path_.as_posix()}/")
-        except Exception as e:
-            logger.warning(e)
-            pass
-    return files_
-
-
-def _move_and_rename_files(
-    files: list[str] | list[Path],
-    src_path: str | Path,
-    dest_path: str | Path,
-    storage_conn: storage.Client,
-    storage_bucket: str,
-    dest_overwrite: bool = False,
-):
-    files_ = [{"name": Path(f), "succeeded": False} for f in files]
-    src_path_ = Path(src_path)
-    dest_path_ = Path(dest_path)
-    bucket = storage_conn.bucket(storage_bucket)
-    for file in files_:
-        file["new_name"] = date_stamp_file(file["name"])
-        src_file_name = Path(src_path_, file["name"]).as_posix()
-        dest_file_name = Path(dest_path_, file["new_name"]).as_posix()
-
-        src_blob = bucket.blob(src_file_name)
-        dest_blob = bucket.blob(dest_file_name)
-        # if src file doesn't exist - skip as successful
-        if not src_blob.exists():
-            file["succeeded"] = True
-            continue
-
-        if dest_blob.exists():
-            if dest_overwrite:
-                dest_blob.delete()
-        try:
-            dest_blob = bucket.copy_blob(src_blob, bucket, dest_file_name)
-            src_blob.delete()
-            file["succeeded"] = True
-            print(f"Moved and renamed {src_file_name} to {dest_file_name}")
-        except Exception as e:
-            print(f"Filed to move {src_file_name}: {str(e)}")
-            logger.warning(e)
-            continue
-
-    return files_
-
-
-def _task_move_and_rename(
-    task_list: ExportTaskList,
-    src_path: str | Path,
-    dest_path: str | Path,
-    storage_conn: storage.Client,
-    storage_bucket: str,
-    dest_overwrite: bool = False,
-) -> ExportTaskList:
-
-    files_to_move = [item.name for item in task_list]
-    files_moved = _move_and_rename_files(
-        files=files_to_move,
-        src_path=src_path,
-        dest_path=dest_path,
-        storage_conn=storage_conn,
-        storage_bucket=storage_bucket,
-        dest_overwrite=dest_overwrite,
-    )
-
-    # Update tasks that failed to move
-    failed_moving = [item["name"] for item in files_moved if not item["succeeded"]]
-    for task in task_list:
-        if task.name in failed_moving:
-            task.task_status = "FAILED"
-            task.error = "Failed to move file to archive."
-            task.task = None
-
-    return task_list
-
-
-def _ee_mask_geometry(
-    ee_image: ee.image.Image,
-    ee_geometry: ee.geometry.Geometry | ee.featurecollection.FeatureCollection,
-):
-    """
-    Masks out the area inside the given geometry (e.g., salares) from the image.
-    Args:
-        image: ee.Image to mask
-        geometry: ee.Geometry or ee.FeatureCollection to mask out
-    Returns:
-        ee.Image with the geometry area masked out
-    """
-    ee_geometry_mask = ee.image.Image.constant(1).clip(ee_geometry).mask()
-    ee_inverted_mask = ee_geometry_mask.Not()
-    ee_inverted_clip = ee_image.updateMask(ee_inverted_mask)
-    return ee_inverted_clip
-
-
-# Previously named addMCD in JS
-def add_mcd(image):
-    """Function to add the 'SENSOR' property to each MODIS image"""
-    return image.set({"SENSOR": "MCD"})
-
-
-# Previously named maskedDEM in JS
-def _ee_masked_dem(ee_image):
-    """Function to mask DEM values less than 0"""
-    ee_mask = ee_image.gte(0)
-    ee_masked = ee_image.updateMask(ee_mask)
-    return ee_masked
-
-
 # TODO Move fix Name Prefix to somewhere else
 # TODO Include rollback of stats file move
 def monthly_tbl_export_proc(
@@ -486,6 +96,13 @@ def monthly_tbl_export_proc(
     # MANIFEST CHECK                            #
     #############################################
 
+    manifest_name = "monthly_manifest.json"
+
+    collection_images = _get_imgs_in_monthly_ic(
+        monthly_collection_path=settings["monthly_collection_path"],
+        name_prefix=_fix_name_prefix(settings["monthly_image_prefix"]),
+    )
+
     # if skip_manifest go directly to export process
     if not skip_manifest:
         logger.debug("Checking manifest")
@@ -494,7 +111,8 @@ def monthly_tbl_export_proc(
         elif compare_manifest_to_collection(
             manifest_src=settings["manifest_source"],
             manifest_path=settings["manifest_path"],
-            manifest_name="monthly_manifest.json",
+            manifest_name=manifest_name,
+            collection_images=collection_images,
             collection_path=settings["monthly_collection_path"],
             image_prefix=settings["monthly_image_prefix"],
             storage_conn=storage_conn,
@@ -808,7 +426,7 @@ def monthly_tbl_export_proc(
         manifest = get_manifest(
             source=settings["manifest_source"],
             manifest_path=settings["manifest_path"],
-            manifest_name="monthly_manifest.json",
+            manifest_name=manifest_name,
             storage_conn=storage_conn,
             storage_bucket=storage_bucket,
         )
@@ -851,7 +469,7 @@ def monthly_tbl_export_proc(
     save_manifest(
         target=settings["manifest_source"],
         manifest_path=settings["manifest_path"],
-        manifest_name="monthly_manifest.json",
+        manifest_name=manifest_name,
         manifest_json=manifest_json,
         storage_conn=storage_conn,
         storage_bucket=storage_bucket,
