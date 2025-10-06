@@ -196,8 +196,16 @@ def update_task_status(session: Session, db_task: Export) -> None:
 def _join_error_msgs(msg1: str | None, msg2: str | None) -> str | None:
     """Join two error messages into one, separated by ' | '."""
 
+    # Return None if both messages are empty or None
+    if not msg1 and not msg2:
+        return None
+    elif not msg1:
+        return msg2
+    elif not msg2:
+        return msg1
+
     if not isinstance(msg1, str) or not isinstance(msg2, str):
-        raise ValueError("Both msg1 and msg2 must be strings or None")
+        raise ValueError("Both msg1 and msg2 must be strings")
 
     # split by ' | ' and remove empty strings
     if msg1:
@@ -208,10 +216,6 @@ def _join_error_msgs(msg1: str | None, msg2: str | None) -> str | None:
         msg2_parts = [part.strip() for part in msg2.split(" | ") if part.strip()]
     else:
         msg2_parts = []
-
-    # Return None if both messages are empty or None
-    if not msg1_parts and not msg2_parts:
-        return None
 
     # Join with [' | ']
     error_msg = " | ".join(msg1_parts + msg2_parts)
