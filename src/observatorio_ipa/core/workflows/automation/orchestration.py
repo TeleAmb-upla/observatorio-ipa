@@ -189,7 +189,6 @@ def auto_job_init(settings: Settings, session: Session) -> str:
         str: The ID of the created job.
     """
     logger.debug("Starting a new Job")
-    db_path = settings.app.automation.db.db_path
 
     # ----- Setting TZ from settings -----
     if tz := settings.app.automation.timezone:
@@ -197,10 +196,10 @@ def auto_job_init(settings: Settings, session: Session) -> str:
 
     # Create new Job
     try:
-        # Create a new job
         job_id = create_job(session, settings.app.automation.timezone)
         logger.info(f"Created new job with ID: {job_id}")
         print(f"Created new job with ID: {job_id}")
+
     except Exception as e:
         error_msg = f"Error creating daily job: {e}"
         logger.error(error_msg)
@@ -236,6 +235,7 @@ def auto_job_init(settings: Settings, session: Session) -> str:
     logger.debug("Saving MODIS status info")
     try:
         _save_modis_status(session, job_id)
+
     except Exception as e:
         error_msg = f"Error saving MODIS status: {e}"
         logger.error(error_msg)
@@ -247,21 +247,30 @@ def auto_job_init(settings: Settings, session: Session) -> str:
         session.commit()
 
     # Execute Image Export
-    # TODO: Add exception handling
-    auto_image_export(session, job_id, settings.app.image_export)
+    try:
+        auto_image_export(session, job_id, settings.app.image_export)
+
+    except Exception as e:
+        error_msg = f"Error executing image export: {e}"
+        logger.error(error_msg)
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(error=error_msg, updated_at=utils_dates.tz_now())
+        )
+        session.commit()
 
     # Quick polling of Task status (if any were created)
     logger.debug("Polling any created tasks (20 seconds delay)")
-    time.sleep(20)  # Give GEE time to react
     due_tasks = _lease_due_tasks(session)
-    for db_task in due_tasks:
-        update_task_status(session, db_task)
+    if due_tasks:
+        time.sleep(20)  # Give GEE time to react
+        for db_task in due_tasks:
+            update_task_status(session, db_task)
 
     return job_id
 
 
-# ALCHEMY DONE
-# TODO: Move all logic to test if section should run to the actual section function.
 def auto_job_orchestration(
     session: Session,
     job_id: int,
@@ -280,29 +289,34 @@ def auto_job_orchestration(
         return
 
     ########## Update Job Status ##########
-    update_job(session, job.id)
-    session.commit()
-
-    # Get updated Job Status
-    job = session.get(Job, job_id)
+    job = update_job(session, job.id)
     if not job:
         return
 
-    ########## Attempt Stats Exports ##########
+    ########## Attempt Image Exports ##########
     if job.job_status == "RUNNING":
-        if job.image_export_status in ("RUNNING"):
-            logger.debug("Image Exports are still running")
-            return
+        match job.image_export_status:
+            case "PENDING":
+                return  # pass for now
+            case "RUNNING":
+                # Finish orchestration, image exports are still running.
+                logger.debug("Image Exports are still running")
+                return
+            case "COMPLETED" | "FAILED":
+                pass
+            case _:
+                return
 
+    ########## Attempt Stats Exports ##########
+    # Early kill, only accepting storage exports for now.
+    if not storage_conn or not settings.app.stats_export.storage_bucket:
+        logger.warning("No storage connection available for stats export")
+        return
+
+    if job.job_status == "RUNNING":
         # Create Stat Export Tasks (if required)
         match job.stats_export_status:
             case "PENDING":
-
-                # Early kill, only accepting storage exports for now.
-                if not storage_conn:
-                    logger.warning("No storage connection available for stats export")
-                    return
-
                 auto_stats_export(
                     session, job.id, settings.app.stats_export, storage_conn
                 )
@@ -310,87 +324,79 @@ def auto_job_orchestration(
 
                 # Get updated job status
                 job = session.get(Job, job.id)
+                if not job or job.stats_export_status not in ("COMPLETED", "FAILED"):
+                    return
 
             case "RUNNING":
                 logger.debug("Stats Exports are still running")
                 return
 
-            case "COMPLETED" | "FAILED":
-                # Double check no pending stat tasks still running
-                running_stats_exports = session.scalars(
-                    select(Export).where(
-                        Export.job_id == job.id,
-                        Export.type == "table",
-                        Export.state == "RUNNING",
+            case "COMPLETED":
+                pass
+
+            case "FAILED":
+                try:
+                    # Rolls back files for any FAILED stats exports
+                    rollback_file_transfers(
+                        session=session,
+                        job_id=job.id,
+                        storage_conn=storage_conn,
+                        storage_bucket=settings.app.stats_export.storage_bucket,
                     )
-                ).all()
-
-                if running_stats_exports:
-                    logger.debug("Stats Exports are still running")
-                    return
-
-                else:
-                    # Finished Stats. Check for FAILURES and attempt file rollbacks
-                    # ----- STATS ROLLBACK -----
-                    if storage_conn and settings.app.stats_export.storage_bucket:
-                        try:
-                            # Rolls back files for any FAILED stats exports
-                            rollback_file_transfers(
-                                session=session,
-                                job_id=job.id,
-                                storage_conn=storage_conn,
-                                storage_bucket=settings.app.stats_export.storage_bucket,
-                            )
-                            session.commit()
-                            update_job(session, job.id)
-                            session.commit()
-                            pass
-                        except Exception as e:
-                            logger.error(f"Error during stats rollback: {e}")
-                            return
-                    else:
-                        logger.warning(
-                            "No storage connection available for stats rollback"
-                        )
+                    session.commit()
+                    job = update_job(session, job.id)
+                    if not job or job.stats_export_status not in (
+                        "COMPLETED",
+                        "FAILED",
+                    ):
                         return
+                except Exception as e:
+                    logger.error(f"Error during stats rollback: {e}")
+                    return
             case _:
                 return
 
     ########## Website Update ##########
-    if not job:
-        return
+
     if job.job_status == "RUNNING" and job.stats_export_status in (
         "COMPLETED",
         "FAILED",
     ):
+        match job.website_update_status:
+            case "PENDING":
+                auto_website_update(session, job.id, settings)
+                session.commit()
+                job = update_job(session, job.id)
+                if not job or job.website_update_status not in (
+                    "SKIPPED",
+                    "COMPLETED",
+                    "FAILED",
+                ):
+                    return
 
-        auto_website_update(session, job.id, settings)
-        session.commit()
-        update_job(session, job.id)
-        session.commit()
-        job = session.get(Job, job.id)
-    if not job:
-        return
+            case "SKIPPED" | "COMPLETED" | "FAILED":
+                pass
+
+            case _:
+                return
 
     ########## Generate Report ##########
-    if job.job_status not in ("COMPLETED", "FAILED") or job.report_status not in (
-        "PENDING"
-    ):
-        # Something is still pending
+    if job.job_status not in ("COMPLETED", "FAILED"):
         return
-    else:
-        # Generate Report
-        auto_job_report(
-            session, job.id, settings.app.email, settings.app.automation.frontend.url
-        )
-        session.commit()
-        update_job(session, job.id)
-        session.commit()
+    match job.report_status:
+        case "PENDING":
+            auto_job_report(
+                session,
+                job.id,
+                settings.app.email,
+                settings.app.automation.frontend.url,
+            )
+            session.commit()
+            job = update_job(session, job.id)
 
     return
 
 
-# ALCHEMY DONE
 def auto_orchestration(settings: Settings, session: Session) -> None:
     """
     Orchestrates the lifecycle of Running jobs.
@@ -448,8 +454,9 @@ def auto_orchestration(settings: Settings, session: Session) -> None:
     #########################################
     logger.debug("Updating Export Task Status...")
     due_tasks = _lease_due_tasks(session)
-    logger.info(f"Updating status for {len(due_tasks)} leased tasks")
-    print(f"Updating status for {len(due_tasks)} leased tasks")
+    msg = f"Updating status for {len(due_tasks)} leased tasks"
+    logger.info(msg)
+    print(msg)
 
     for db_task in due_tasks:
         update_task_status(session, db_task)
@@ -464,8 +471,9 @@ def auto_orchestration(settings: Settings, session: Session) -> None:
             Job.job_status.in_(["RUNNING"]) | Job.report_status.in_(["PENDING"])
         )
     ).all()
-    logger.info(f"Orchestrating {len(jobs)} pending jobs")
-    print(f"Orchestrating {len(jobs)} pending jobs")
+    msg = f"Orchestrating {len(jobs)} pending jobs"
+    logger.info(msg)
+    print(msg)
 
     for job in jobs:
         auto_job_orchestration(session, job.id, settings, storage_conn)

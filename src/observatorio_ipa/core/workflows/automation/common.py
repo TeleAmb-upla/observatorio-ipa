@@ -240,444 +240,6 @@ def _get_state_of_tasks(session: Session, job_id: str, export_type: str) -> list
     return [r.state for r in rows]
 
 
-# ALCHEMY DONE
-# TODO: Split this into smaller functions
-def update_job(session: Session, job_id: str) -> None:
-    """Updates the job statuses based on the statuses of associated export tasks."""
-
-    # print(f"Updating status for job {job_id}")
-
-    now = utils_dates.tz_now()
-
-    # Exit if job is not RUNNING - Assumes Nothing Needs Update
-    job = session.get(Job, job_id)
-    if not job:
-        raise ValueError(f"Job with id {job_id} not found")
-
-    if job.job_status != "RUNNING":
-        return
-
-    # print("Checking Image status")
-    # ---------- IMAGE_EXPORT_STATUS ----------
-    image_states = _get_state_of_tasks(session, job_id, "image")
-    match job.image_export_status:
-        case "NOT_REQUIRED":
-            # Not Normal - state shouldn't exist
-            error_message = _join_error_msgs(
-                job.error,
-                "Program produced an abnormal state while running Image export procedure.",
-            )
-            session.execute(
-                update(Job)
-                .where(Job.id == job_id)
-                .values(
-                    image_export_status="FAILED", error=error_message, updated_at=now
-                )
-            )
-            session.commit()
-            return
-
-        case "PENDING":
-            if not image_states:
-                # Normal - Might still be waiting to create Image Export Tasks
-                # ! Add logic for deadline (Pending over x days)
-                return
-
-            else:
-                # Not Normal - Export tasks might have been created but failed to update Job Status and never changed to "RUNNING"
-                error_message = _join_error_msgs(
-                    job.error,
-                    "One or more Image tasks might have failed to create or could not be saved to DB. Check logs and GEE tasks for details.",
-                )
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(
-                        image_export_status="FAILED",
-                        error=error_message,
-                        updated_at=now,
-                    )
-                )
-                return
-
-        case "RUNNING":
-            if not image_states:
-                # Not Normal: If image_export_status = RUNNING, at least 1 image export should be present
-                error_message = _join_error_msgs(
-                    job.error,
-                    "One or more Image tasks might have failed to create or could not be saved to DB. Check logs and GEE tasks for details.",
-                )
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(
-                        image_export_status="FAILED",
-                        error=error_message,
-                        updated_at=now,
-                    )
-                )
-                session.commit()
-                return
-
-            elif all(s != "RUNNING" for s in image_states):
-                if any(s == "FAILED" for s in image_states):
-                    error_message = _join_error_msgs(
-                        job.error,
-                        "One or more image exports failed",
-                    )
-                    session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(
-                            image_export_status="FAILED",
-                            error=error_message,
-                            updated_at=now,
-                        )
-                    )
-                    session.commit()
-                    return
-                else:
-                    # Normal: All image export tasks have now completed
-                    session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(image_export_status="COMPLETED", updated_at=now)
-                    )
-                    session.commit()
-            else:
-                # Normal: 1+ exports are still running - No change - keep "RUNNING" state
-                return
-
-        case "FAILED":
-            # Do Nothing - Something set the Failed state - leave as is - Continue to Stats
-            pass
-
-        case "COMPLETED":
-            if not image_states:
-                # Normal. No Images required exporting. Move on to Stats
-                if job.stats_export_status in (None, "PENDING"):
-                    # session.execute(
-                    #     update(Job)
-                    #     .where(Job.id == job_id)
-                    #     .values(stats_export_status="NOT_REQUIRED", updated_at=now)
-                    # )
-                    # session.commit()
-                    return
-            elif any(s == "RUNNING" for s in image_states):
-                # Not Normal: Not expecting to still be 'RUNNING' exports if image_export_status is COMPLETED
-                # revert to "RUNNING" stats has not Ran
-                if job.stats_export_status in (
-                    "NOT_REQUIRED",
-                    "PENDING",
-                ):
-                    session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(image_export_status="RUNNING", updated_at=now)
-                    )
-                    session.commit()
-                return
-            elif any(s == "FAILED" for s in image_states):
-                # Not Normal: If image_export_status = COMPLETED, No images should have failed
-                error_message = _join_error_msgs(
-                    job.error,
-                    "One or more image exports failed",
-                )
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(
-                        image_export_status="FAILED",
-                        error=error_message,
-                        updated_at=now,
-                    )
-                )
-                session.commit()
-                return
-            else:
-                # Normal: Continue to stats status assessment
-                pass
-
-        case _:
-            # Not Normal: Unknown state: Set as failed
-            error_message = _join_error_msgs(
-                job.error,
-                "Image export procedure entered an unknown state",
-            )
-            session.execute(
-                update(Job)
-                .where(Job.id == job_id)
-                .values(
-                    image_export_status="FAILED", error=error_message, updated_at=now
-                )
-            )
-            return
-
-    # ---------- STATS_EXPORT_STATUS ----------
-    # Sanity check in case I missed something above
-
-    if job.image_export_status in ["NOT_REQUIRED", "PENDING", "RUNNING"] or any(
-        s == "RUNNING" for s in image_states
-    ):
-        return
-
-    # print("Checking Stats status")
-    table_states = _get_state_of_tasks(session, job_id, "table")
-    match job.stats_export_status:
-        case "NOT_REQUIRED":
-            # print("Successfully entered NOT_REQUIRED")
-            if not table_states:
-                # print("Successfully entered no stat tasks")
-                # Normal: No table export required/Expected
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(stats_export_status="COMPLETED", updated_at=now)
-                )
-                session.commit()
-                return
-            else:
-                # Not Normal - Export tasks might have been created but failed to update Job Status
-                error_message = _join_error_msgs(
-                    job.error,
-                    "Program produced an abnormal state while running Stats export procedure.",
-                )
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(
-                        stats_export_status="FAILED",
-                        error=error_message,
-                        updated_at=now,
-                    )
-                )
-                session.commit()
-                return
-
-        case "PENDING":
-            if not table_states:
-                # Normal - Might still be waiting to create Stats Export Tasks
-                # ! Add logic for deadline (Pending over x days)
-                return
-
-            else:
-                # Not Normal: Export tasks might have been created but failed to update Job Status
-                error_message = _join_error_msgs(
-                    job.error,
-                    "One or more Stats tasks might have failed to create or save to DB. Check logs and GEE tasks for details.",
-                )
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(
-                        stats_export_status="FAILED",
-                        error=error_message,
-                        updated_at=now,
-                    )
-                )
-                session.commit()
-                return
-
-        case "RUNNING":
-            if not table_states:
-                # Not Normal: If stats_export_status = RUNNING, at least 1 stats export should be present
-                error_message = _join_error_msgs(
-                    job.error,
-                    "One or more Stats tasks might have failed to create or save to DB. Check logs and GEE tasks for details.",
-                )
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(
-                        stats_export_status="FAILED",
-                        error=error_message,
-                        updated_at=now,
-                    )
-                )
-                session.commit()
-                return
-
-            elif all(s != "RUNNING" for s in table_states):
-                if any(s == "FAILED" for s in table_states):
-                    error_message = _join_error_msgs(
-                        job.error,
-                        "One or more Stats exports failed",
-                    )
-                    session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(
-                            stats_export_status="FAILED",
-                            error=error_message,
-                            updated_at=now,
-                        )
-                    )
-                    session.commit()
-                    return
-                else:
-                    session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(stats_export_status="COMPLETED", updated_at=now)
-                    )
-                    session.commit()
-            else:
-                # Normal: 1+ exports are still running - No change - keep "RUNNING" state
-                return
-
-        case "FAILED":
-            # Do Nothing - Something set the Failed state - leave as is - Continue
-            pass
-
-        case "COMPLETED":
-            if not table_states:
-                # Normal: Finished without any exports. Continue to update Job Status
-                pass
-            elif any(s == "RUNNING" for s in table_states):
-                # Not Normal: Not expecting to still be 'RUNNING' exports if stats_export_status is COMPLETED
-                # revert to "RUNNING" stats until all tasks complete if reporting has not gone out
-                if job.report_status in ("PENDING"):
-                    session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(stats_export_status="RUNNING", updated_at=now)
-                    )
-                    session.commit()
-                    return
-            else:
-                if any(s == "FAILED" for s in table_states):
-                    # Not Normal: If any exports failed, set to "FAILED"
-                    session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(stats_export_status="FAILED", updated_at=now)
-                    )
-                    session.commit()
-                    return
-                else:
-                    # Normal: Continue to Job status assessment
-                    pass
-
-        case _:
-            # Not Normal: Unknown state: Set as failed
-            error_message = _join_error_msgs(
-                job.error,
-                "Stats export procedure entered an unknown state",
-            )
-            session.execute(
-                update(Job)
-                .where(Job.id == job_id)
-                .values(
-                    stats_export_status="FAILED", error=error_message, updated_at=now
-                )
-            )
-            session.commit()
-            return
-
-    # ---------- WEBSITE_UPDATE_STATUS ----------
-    # Sanity check in case I missed something above
-    # fmt: off
-    if (job.stats_export_status in ["NOT_REQUIRED", "PENDING", "RUNNING"] or
-    any(s == "RUNNING" for s in image_states) or
-    any(s == "RUNNING" for s in table_states)):
-        return
-    # fmt: on
-
-    # Fetch website update tasks
-    website_job = session.scalars(
-        select(WebsiteUpdate).where(WebsiteUpdate.job_id == job_id)
-    ).first()
-
-    # Stop if website update task hasn't been created. Run - Auto_website_update()
-    if not website_job:
-        return
-
-    # If website and Job status don't match, update.
-    if website_job.status != job.website_update_status:
-        if website_job.status == "FAILED":
-            error_message = _join_error_msgs(
-                job.error,
-                website_job.last_error,
-            )
-        else:
-            error_message = job.error
-
-        # Update status in Job
-        session.execute(
-            update(Job)
-            .where(Job.id == job_id)
-            .values(
-                website_update_status=website_job.status,
-                error=error_message,
-                updated_at=now,
-            )
-        )
-        session.commit()
-        return
-
-    if website_job.status in ("PENDING", "RUNNING"):
-        # Still running, do nothing
-        return
-    else:
-        # Completed, move on to Job Status Update
-        pass
-
-    # -------------- JOB_STATUS --------------
-    # Sanity check in case I missed something above
-    # fmt: off
-    if (job.website_update_status in ["PENDING", "RUNNING"] or
-    any(s == "RUNNING" for s in image_states) or
-    any(s == "RUNNING" for s in table_states)):
-        return
-    # fmt: on
-
-    match job.job_status:
-        case "RUNNING":
-            if (
-                job.image_export_status == "FAILED"
-                or job.stats_export_status == "FAILED"
-                or job.website_update_status == "FAILED"
-            ):
-                # Not Normal: If any exports failed, set to "FAILED"
-                # No error message required, should have been set in image or stats updates
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(job_status="FAILED", updated_at=now)
-                )
-                session.commit()
-                return
-            else:
-                # Normal: Finished Successfully
-                session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(job_status="COMPLETED", updated_at=now)
-                )
-                session.commit()
-            return
-
-        case "FAILED" | "COMPLETED":
-            # Already Finished, Do Nothing
-            return
-
-        case _:
-            # Not Normal: Unknown state: Set as failed
-            error_message = _join_error_msgs(
-                job.error,
-                "Job execution entered an unknown state",
-            )
-            session.execute(
-                update(Job)
-                .where(Job.id == job_id)
-                .values(job_status="FAILED", error=error_message, updated_at=now)
-            )
-            session.commit()
-            return
-
-    return
-
-
 def add_exportTask_to_db(
     session: Session, job_id: str, export_task: ExportTask
 ) -> None:
@@ -706,3 +268,443 @@ def add_exportTask_to_db(
     )
 
     session.commit()
+
+
+def update_image_export_status(session: Session, job_id: str) -> str:
+    """Updates the image export status of a given job
+
+    Args:
+        session (Session): The database session.
+        job_id (str): The ID of the job.
+
+    Returns:
+        str: Updated status of the job image export process.
+    """
+
+    now = utils_dates.tz_now()
+
+    # Exit if job is not RUNNING - Assumes Nothing Needs Update
+    job = session.get(Job, job_id)
+    if not job:
+        raise ValueError(f"Job with id {job_id} not found")
+
+    image_states = _get_state_of_tasks(session, job_id, "image")
+
+    match job.image_export_status:
+        case "PENDING":
+            if not image_states:
+                # Normal - Might still be waiting to create Image Export Tasks
+                # ! Add logic for deadline (Pending over x days)
+                return "PENDING"
+
+            else:
+                # Not Normal - Export tasks might have been created but failed to update Job Status and never changed to "RUNNING"
+                error_message = _join_error_msgs(
+                    job.error,
+                    "One or more Image tasks might have failed to create or could not be saved to DB. Check logs and GEE tasks for details.",
+                )
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        image_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
+                )
+                return "FAILED"
+
+        case "RUNNING":
+            if not image_states:
+                # Assuming no error and no image exports were required. Move to Completed.
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        image_export_status="COMPLETED",
+                        updated_at=now,
+                    )
+                )
+                session.commit()
+                return "COMPLETED"
+
+            elif all(s != "RUNNING" for s in image_states):
+                if any(s == "FAILED" for s in image_states):
+                    error_message = _join_error_msgs(
+                        job.error,
+                        "One or more image exports failed",
+                    )
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(
+                            image_export_status="FAILED",
+                            error=error_message,
+                            updated_at=now,
+                        )
+                    )
+                    session.commit()
+                    return "FAILED"
+                else:
+                    # Normal: All image export tasks have now completed
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(image_export_status="COMPLETED", updated_at=now)
+                    )
+                    session.commit()
+                    return "COMPLETED"
+            else:
+                # Normal: 1+ exports are still running - No change - keep "RUNNING" state
+                return "RUNNING"
+
+        case "FAILED":
+            # Do Nothing - Something set the Failed state - leave as is - Continue to Stats
+            return "FAILED"
+
+        case "COMPLETED":
+            if any(s == "RUNNING" for s in image_states):
+                # Not Normal: Not expecting to still be 'RUNNING' exports if image_export_status is COMPLETED
+                # revert to "RUNNING" if stats exports has not started
+                if job.stats_export_status in (
+                    "NOT_REQUIRED",
+                    "PENDING",
+                ):
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(image_export_status="RUNNING", updated_at=now)
+                    )
+                    session.commit()
+                return "RUNNING"
+            elif any(s == "FAILED" for s in image_states):
+                # Not Normal: If image_export_status = COMPLETED, No images should have failed
+                error_message = _join_error_msgs(
+                    job.error,
+                    "One or more image exports failed",
+                )
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        image_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
+                )
+                session.commit()
+                return "FAILED"
+            else:
+                # Normal: Continue to stats status assessment
+                return "COMPLETED"
+
+        case _:
+            # Not Normal: Unknown state: Set as failed
+            error_message = _join_error_msgs(
+                job.error,
+                "Image export procedure entered an unknown state",
+            )
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    image_export_status="FAILED", error=error_message, updated_at=now
+                )
+            )
+            return "FAILED"
+    return job.image_export_status
+
+
+def update_stats_export_status(session: Session, job_id: str) -> str:
+    """Updates the stats export status of a given job
+
+    Args:
+        session (Session): The database session.
+        job_id (str): The ID of the job.
+
+    Returns:
+        str: Updated status of the job stats export process.
+    """
+
+    now = utils_dates.tz_now()
+
+    # Exit if job is not RUNNING - Assumes Nothing Needs Update
+    job = session.get(Job, job_id)
+    if not job:
+        raise ValueError(f"Job with id {job_id} not found")
+
+    # ---------- STATS_EXPORT_STATUS ----------
+    table_states = _get_state_of_tasks(session, job_id, "table")
+    match job.stats_export_status:
+        case "NOT_REQUIRED":
+            if not table_states:
+                # Normal: No table export required/Expected
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(stats_export_status="COMPLETED", updated_at=now)
+                )
+                session.commit()
+                return "COMPLETED"
+            else:
+                # Not Normal - Export tasks might have been created but failed to update Job Status
+                error_message = _join_error_msgs(
+                    job.error,
+                    "Program produced an abnormal state while running Stats export procedure.",
+                )
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        stats_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
+                )
+                session.commit()
+                return "FAILED"
+
+        case "PENDING":
+            if not table_states:
+                # Normal - Might still be waiting to create Stats Export Tasks
+                # ! Add logic for deadline (Pending over x days)
+                return "PENDING"
+
+            else:
+                # Not Normal: Export tasks might have been created but failed to update Job Status
+                error_message = _join_error_msgs(
+                    job.error,
+                    "One or more Stats tasks might have failed to create or save to DB. Check logs and GEE tasks for details.",
+                )
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        stats_export_status="FAILED",
+                        error=error_message,
+                        updated_at=now,
+                    )
+                )
+                session.commit()
+                return "FAILED"
+
+        case "RUNNING":
+            if not table_states:
+                # Assuming no errors and no stat tables were exported. Moving to COMPLETED
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(
+                        stats_export_status="COMPLETED",
+                        updated_at=now,
+                    )
+                )
+                session.commit()
+                return "COMPLETED"
+
+            elif all(s != "RUNNING" for s in table_states):
+                if any(s == "FAILED" for s in table_states):
+                    error_message = _join_error_msgs(
+                        job.error,
+                        "One or more Stats exports failed",
+                    )
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(
+                            stats_export_status="FAILED",
+                            error=error_message,
+                            updated_at=now,
+                        )
+                    )
+                    session.commit()
+                    return "FAILED"
+                else:
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(stats_export_status="COMPLETED", updated_at=now)
+                    )
+                    session.commit()
+                    return "COMPLETED"
+
+            else:
+                # Normal: 1+ exports are still running - No change - keep "RUNNING" state
+                return "RUNNING"
+
+        case "FAILED":
+            # Do Nothing - Something set the Failed state - leave as is - Continue
+            return "FAILED"
+
+        case "COMPLETED":
+            if not table_states:
+                # Normal: Finished without any exports. Continue to update Job Status
+                return "COMPLETED"
+
+            elif any(s == "RUNNING" for s in table_states):
+                # Not Normal: Not expecting to still be 'RUNNING' exports if stats_export_status is COMPLETED
+                # revert to "RUNNING" stats until all tasks complete if reporting has not gone out
+                if job.report_status in ("PENDING"):
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(stats_export_status="RUNNING", updated_at=now)
+                    )
+                    session.commit()
+                    return "PENDING"
+            else:
+                if any(s == "FAILED" for s in table_states):
+                    # Not Normal: If any exports failed, set to "FAILED"
+                    session.execute(
+                        update(Job)
+                        .where(Job.id == job_id)
+                        .values(stats_export_status="FAILED", updated_at=now)
+                    )
+                    session.commit()
+                    return "FAILED"
+                else:
+                    # Normal: Continue to Job status assessment
+                    return "COMPLETED"
+
+        case _:
+            # Not Normal: Unknown state: Set as failed
+            error_message = _join_error_msgs(
+                job.error,
+                "Stats export procedure entered an unknown state",
+            )
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    stats_export_status="FAILED", error=error_message, updated_at=now
+                )
+            )
+            session.commit()
+            return "FAILED"
+
+    return job.stats_export_status
+
+
+def update_website_status(session: Session, job_id: str) -> str:
+    """Updates the website update status of a given job
+
+    Args:
+        session (Session): The database session.
+        job_id (str): The ID of the job.
+
+    Returns:
+        str: Updated status of the job website update process.
+    """
+
+    now = utils_dates.tz_now()
+
+    # Exit if job is not RUNNING - Assumes Nothing Needs Update
+    job = session.get(Job, job_id)
+    if not job:
+        raise ValueError(f"Job with id {job_id} not found")
+
+    # Fetch website update tasks
+    website_job = session.scalars(
+        select(WebsiteUpdate).where(WebsiteUpdate.job_id == job_id)
+    ).first()
+
+    # Stop if website update task hasn't been created. Waiting for orchestrator to run Auto_website_update()
+    if not website_job:
+        return job.website_update_status
+
+    # If website and Job status don't match, update.
+    if website_job.status != job.website_update_status:
+        if website_job.status == "FAILED":
+            error_message = _join_error_msgs(
+                job.error,
+                website_job.last_error,
+            )
+        else:
+            error_message = job.error
+
+        # Update status in Job
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id)
+            .values(
+                website_update_status=website_job.status,
+                error=error_message,
+                updated_at=now,
+            )
+        )
+        session.commit()
+
+    return website_job.status
+
+
+def update_job(session: Session, job_id: str) -> Job | None:
+    """Updates the job statuses based on the statuses of associated export tasks."""
+
+    now = utils_dates.tz_now()
+
+    # Exit if job is not RUNNING - Assumes Nothing Needs Update
+    job = session.get(Job, job_id)
+    if not job:
+        raise ValueError(f"Job with id {job_id} not found")
+
+    if job.job_status != "RUNNING":
+        return job
+
+    # ---------- IMAGE_EXPORT_STATUS ----------
+
+    if update_image_export_status(session, job_id) != "COMPLETED":
+        return session.get(Job, job_id)
+
+    # ---------- STATS_EXPORT_STATUS ----------
+
+    if update_stats_export_status(session, job_id) != "COMPLETED":
+        return session.get(Job, job_id)
+
+    # ---------- WEBSITE_UPDATE_STATUS ----------
+
+    if update_website_status(session, job_id) != "COMPLETED":
+        return session.get(Job, job_id)
+
+    # -------------- JOB_STATUS --------------
+
+    match job.job_status:
+        case "RUNNING":
+            if (
+                job.image_export_status == "FAILED"
+                or job.stats_export_status == "FAILED"
+                or job.website_update_status == "FAILED"
+            ):
+                # Not Normal: If any exports failed, set to "FAILED"
+                # No error message required, should have been set in image or stats updates
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(job_status="FAILED", updated_at=now)
+                )
+                session.commit()
+            else:
+                # Normal: Finished Successfully
+                session.execute(
+                    update(Job)
+                    .where(Job.id == job_id)
+                    .values(job_status="COMPLETED", updated_at=now)
+                )
+                session.commit()
+
+        case "FAILED" | "COMPLETED":
+            # Already Finished, Do Nothing
+            pass
+        case _:
+            # Not Normal: Unknown state: Set as failed
+            error_message = _join_error_msgs(
+                job.error,
+                "Job execution entered an unknown state",
+            )
+            session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(job_status="FAILED", error=error_message, updated_at=now)
+            )
+            session.commit()
+
+    return session.get(Job, job_id)
