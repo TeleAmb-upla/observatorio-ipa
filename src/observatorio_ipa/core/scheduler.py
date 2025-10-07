@@ -79,13 +79,18 @@ def _job_create(settings: Settings, session_maker: sessionmaker) -> None:
 
 def _job_poll(settings: Settings, session_maker: sessionmaker) -> None:
     logger.info("poll_and_orchestrate: start")
+    with session_maker() as session:
+        auto_orchestration(settings, session)
+    logger.info("poll_and_orchestrate: end")
+
+
+def _job_heartbeat(settings: Settings) -> None:
+    logger.debug("Heartbeat: start")
     write_poll_heartbeat(
         heartbeat_file=settings.app.automation.heartbeat.heartbeat_file,
         timezone=settings.app.automation.timezone,
     )
-    with session_maker() as session:
-        auto_orchestration(settings, session)
-    logger.info("poll_and_orchestrate: end")
+    logger.debug("Heartbeat: end")
 
 
 def main():
@@ -155,6 +160,20 @@ def main():
     sched = BlockingScheduler(timezone=tz_str, logger=logger)
     logger.debug(f"Scheduler created with timezone: {sched.timezone}")
 
+    # --- Create job heartbeat
+    interval_minutes = (
+        runtime_settings.app.automation.orchestration_job.interval_minutes
+    )
+    sched.add_job(
+        func=_job_heartbeat,
+        trigger=IntervalTrigger(minutes=interval_minutes),
+        kwargs={"settings": runtime_settings},
+        id="heartbeat",
+        max_instances=1,  # prevent overlapping polls from APScheduler side
+        coalesce=True,  # if we fall behind, run once (not catch up N times)
+        misfire_grace_time=60,  # seconds grace to run if missed (e.g., restart)
+    )
+
     # --- Create job scheduling
     job_cron = runtime_settings.app.automation.daily_job.cron
     if job_cron:
@@ -173,9 +192,6 @@ def main():
     )
 
     # --- Poll scheduling
-    interval_minutes = (
-        runtime_settings.app.automation.orchestration_job.interval_minutes
-    )
 
     sched.add_job(
         func=_job_poll,
