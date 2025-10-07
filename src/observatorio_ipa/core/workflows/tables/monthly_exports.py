@@ -406,7 +406,6 @@ def monthly_tbl_export_proc(
     joined_export_tasks.extend(year_export_tasks)
 
     # Start Exports
-    logger.debug("Starting export tasks")
     joined_export_tasks.start_exports()
 
     ####################################
