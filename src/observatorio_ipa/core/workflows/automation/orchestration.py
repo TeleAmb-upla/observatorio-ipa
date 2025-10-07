@@ -176,7 +176,7 @@ def _lease_due_tasks(session: Session) -> list[Export]:
 
 # ALCHEMY DONE
 # TODO: Set counter for retries of Job Reporting
-def auto_job_init(settings: Settings, session: Session) -> str:
+def auto_job_init(settings: Settings, session: Session) -> str | None:
     """Initialize a new job and creates Image Export Tasks if required.
 
     This function requires a Settings object of type core.config.Settings.
@@ -203,7 +203,7 @@ def auto_job_init(settings: Settings, session: Session) -> str:
     except Exception as e:
         error_msg = f"Error creating daily job: {e}"
         logger.error(error_msg)
-        raise e
+        return None
 
     # Connect to GEE
     logger.debug("Initializing connection to GEE")
@@ -229,7 +229,7 @@ def auto_job_init(settings: Settings, session: Session) -> str:
             ),
         )
         session.commit()
-        raise e
+        return None
 
     # Save MODIS status
     logger.debug("Saving MODIS status info")
@@ -256,17 +256,13 @@ def auto_job_init(settings: Settings, session: Session) -> str:
         session.execute(
             update(Job)
             .where(Job.id == job_id)
-            .values(error=error_msg, updated_at=utils_dates.tz_now())
+            .values(
+                image_export_status="FAILED",
+                error=error_msg,
+                updated_at=utils_dates.tz_now(),
+            )
         )
         session.commit()
-
-    # Quick polling of Task status (if any were created)
-    logger.debug("Polling any created tasks (20 seconds delay)")
-    due_tasks = _lease_due_tasks(session)
-    if due_tasks:
-        time.sleep(20)  # Give GEE time to react
-        for db_task in due_tasks:
-            update_task_status(session, db_task)
 
     return job_id
 

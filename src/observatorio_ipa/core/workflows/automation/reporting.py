@@ -258,14 +258,13 @@ def auto_job_report(
             logging.info("Email reporting is disabled.")
 
     except Exception as e:
-        error_msg = f"Error generating report for job {job_id}: {e}"
-        logger.error(error_msg)
+        logger.error(f"Error generating report for job {job_id}: {e}")
         session.execute(
             update(Report)
             .where(Report.id == report_record.id)
             .values(
                 status="FAILED",
-                last_error=error_msg,
+                last_error=str(e),
                 updated_at=tz_now(),
             )
         )

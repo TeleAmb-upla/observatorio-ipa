@@ -652,17 +652,17 @@ def update_job(session: Session, job_id: str) -> Job | None:
 
     # ---------- IMAGE_EXPORT_STATUS ----------
 
-    if update_image_export_status(session, job_id) != "COMPLETED":
+    if update_image_export_status(session, job_id) not in ("COMPLETED", "FAILED"):
         return session.get(Job, job_id)
 
     # ---------- STATS_EXPORT_STATUS ----------
 
-    if update_stats_export_status(session, job_id) != "COMPLETED":
+    if update_stats_export_status(session, job_id) not in ("COMPLETED", "FAILED"):
         return session.get(Job, job_id)
 
     # ---------- WEBSITE_UPDATE_STATUS ----------
 
-    if update_website_status(session, job_id) != "COMPLETED":
+    if update_website_status(session, job_id) not in ("COMPLETED", "SKIPPED"):
         return session.get(Job, job_id)
 
     # -------------- JOB_STATUS --------------
