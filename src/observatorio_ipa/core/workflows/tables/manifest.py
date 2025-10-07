@@ -204,12 +204,28 @@ def compare_manifest_to_collection(
         )
     except Exception as e:
         logger.warning(f"Couldn't read manifest: {e}")
-        manifest = {}
+        logger.warning(
+            f"Assuming manifest is missing on purpose. If this is unexpected, check manifest inputs provided in settings TOML file"
+        )
+        return False
 
-    manifest_collection_path = Path(manifest.get("image_collection", ""))
-    manifest_images: list = manifest.get("images", [])
+    manifest_collection_src = manifest.get("source", {})
+    manifest_collection_path = Path(manifest_collection_src.get("image_collection", ""))
+    manifest_images: list = manifest_collection_src.get("images", [])
 
-    return (
-        collection_path == manifest_collection_path
-        and collection_images.sort() == manifest_images.sort()
-    )
+    if collection_path != manifest_collection_path:
+        logger.info(
+            f"Collection path {collection_path} does not match manifest collection path {manifest_collection_path}."
+        )
+        return False
+
+    if len(collection_images) != len(manifest_images):
+        logger.info(
+            f"Collection has {len(collection_images)} images, but manifest has {len(manifest_images)} images."
+        )
+        return False
+
+    if collection_images.sort() != manifest_images.sort():
+        logger.info(f"Images in the collection and manifest don't match.")
+        return False
+    return True

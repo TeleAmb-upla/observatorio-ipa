@@ -108,6 +108,10 @@ def yearly_tbl_export_proc(
                 "No significant changes in source collection compared to manifest. Skipping Stats export."
             )
             return ExportTaskList()
+        else:
+            logger.info(
+                "Changes detected from source collection compared to manifest. Continuing export process."
+            )
 
     ###########################################
     # INPUT TREATMENT #! SEE IF THIS CAN BE MOVED SOMEWHERE ELSE
