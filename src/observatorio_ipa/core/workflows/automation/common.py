@@ -354,14 +354,14 @@ def update_job(session: Session, job_id: str) -> None:
 
         case "COMPLETED":
             if not image_states:
-                # Normal. No Images required exporting. Set to Skip Stats Export
+                # Normal. No Images required exporting. Move on to Stats
                 if job.stats_export_status in (None, "PENDING"):
-                    session.execute(
-                        update(Job)
-                        .where(Job.id == job_id)
-                        .values(stats_export_status="NOT_REQUIRED", updated_at=now)
-                    )
-                    session.commit()
+                    # session.execute(
+                    #     update(Job)
+                    #     .where(Job.id == job_id)
+                    #     .values(stats_export_status="NOT_REQUIRED", updated_at=now)
+                    # )
+                    # session.commit()
                     return
             elif any(s == "RUNNING" for s in image_states):
                 # Not Normal: Not expecting to still be 'RUNNING' exports if image_export_status is COMPLETED

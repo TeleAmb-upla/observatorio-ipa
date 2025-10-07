@@ -43,6 +43,7 @@ def auto_image_export(
         return
 
     # bump status to RUNNING
+    logger.debug("Setting image export status to 'RUNNING'")
     session.execute(
         update(Job)
         .where(Job.id == job_id)
@@ -70,6 +71,7 @@ def auto_image_export(
     except Exception as e:
         # Mark Job as FAILED if monthly export doesn't complete
         logger.error(f"Error during monthly image export: {e}")
+        logger.debug("Setting image export status to 'FAILED'")
         error_msg = _join_error_msgs(job.error, str(e))
         session.execute(
             update(Job)
@@ -85,6 +87,7 @@ def auto_image_export(
 
     if len(export_tasks) == 0:
         logger.info("No image exports generated for this job")
+        logger.debug("Setting image export status to 'COMPLETED'")
         session.execute(
             update(Job)
             .where(Job.id == job_id)
