@@ -568,6 +568,40 @@ class DjangoSettings(BaseSettings):
     # media_url: str = "/media/"
 
 
+class GCPOauthConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+    enable_gcp_oauth: bool = Field(
+        default=False, description="Enable GCP OAuth authentication"
+    )
+    oauth_client_id_file: FilePath | None = Field(
+        default=None, description="Google OAuth Client ID"
+    )
+    oauth_client_secret_file: FilePath | None = Field(
+        default=None, description="Google OAuth Client Secret"
+    )
+    gcp_project_id: str | None = Field(
+        default=None, description="GCP Project ID for access control"
+    )
+
+    @model_validator(mode="after")
+    def check_required_fields(self):
+        if self.enable_gcp_oauth:
+            missing = []
+            if not self.oauth_client_id_file:
+                missing.append("oauth_client_id_file")
+            if not self.oauth_client_secret_file:
+                missing.append("oauth_client_secret_file")
+            if not self.gcp_project_id:
+                missing.append("gcp_project_id")
+            if missing:
+                raise ValueError(
+                    f"When enable_gcp_oauth is True, the following fields must be set: {', '.join(missing)}"
+                )
+        return self
+
+
 class WebSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
@@ -579,6 +613,7 @@ class WebSettings(BaseSettings):
         db_path=DEFAULT_DB_PATH,
         db_name="observatorio_ipa_web.db",
     )
+    gcp_oauth: GCPOauthConfig
 
 
 def _deep_merge_dicts(a: dict, b: Mapping) -> dict:
