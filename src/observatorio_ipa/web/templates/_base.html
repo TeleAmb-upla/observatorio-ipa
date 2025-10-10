@@ -19,27 +19,33 @@
 </head>
 
 <body class="d-flex flex-column min-vh-100">
-    <!-- HEADER -->
+    <!-- Header Navbar -->
     <nav class="navbar navbar-expand-lg  bg-light">
-        <div class="container-md">
+        <div class="container-lg">
             <a class="navbar-brand" href="{% url 'home' %}">
-                <i class="bi bi-images d-inline-block"></i> OSN Image Processing Automation
+                <i class="bi bi-images d-inline-block"></i>
+                <span class="d-none d-md-inline">OSN Image Processing Automation</span>
+                <span class="d-inline d-md-none">OSN Automation</span>
             </a>
             {% if user.is_authenticated %}
-            <form class="d-flex me-3" role="search" method="get" action="{% url 'search_jobs_exports' %}">
+            <!-- Search Bar (hidden on xs) -->
+            <form class="d-none d-sm-flex me-3" role="search" method="get" action="{% url 'search_jobs_exports' %}">
                 <input class="form-control me-2" type="search" name="q" placeholder="Search Job/Export ID" aria-label="Search" required>
                 <button class="btn btn-outline-success" type="submit">Search</button>
             </form>
 
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#top-navbar"
+            <!-- Navbar Menu Toggler -->
+            <button class="navbar-toggler ms-auto" type="button" data-bs-toggle="collapse" data-bs-target="#top-navbar"
                 aria-controls="top-navbar" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             
+            <!-- Navbar Menu -->
             <div id="top-navbar" class="collapse navbar-collapse justify-content-end">
                 <div class="navbar-nav">
                     <a class="nav-link" href="{% url 'home' %}">Home</a>
                     <a class="nav-link" href="{% url 'job_list' %}">Jobs</a>
+                    <!-- User Menu -->
                     <div class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             {% user_display user %}
@@ -73,7 +79,7 @@
             {% endif %}
         </div>
     </nav>
-    <div class="container-md mt-3">
+    <div class="container-lg mt-3">
         {% block content %}
         {% endblock content %}
     </div>
