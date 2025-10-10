@@ -5,10 +5,9 @@ from django_tables2.views import SingleTableMixin, RequestConfig
 from django_filters.views import FilterView
 
 from .models import Job, Export, FileTransfer, Report, WebsiteUpdate, Modis
-from django.db.models import Q
+from django.db.models import Q, Count
 from .tables import JobsTable, ExportsTable
 from .filters import RunningJobsFilter
-
 
 PAGINATION_SIZES = [10, 25, 50, 100]
 
@@ -20,7 +19,11 @@ class RunningJobsListView(LoginRequiredMixin, SingleTableMixin, ListView):
     paginate_by = 10
 
     def get_queryset(self):
-        queryset = Job.objects.filter(job_status="RUNNING").order_by("-created_at")
+        queryset = (
+            Job.objects.filter(job_status="RUNNING")
+            .annotate(exports_count=Count("exports"))
+            .order_by("-created_at")
+        )
         search_query = self.request.GET.get("running_job_search", "").strip()
         created_at_query = self.request.GET.get("running_job_created_at", "").strip()
         if search_query:
@@ -47,7 +50,12 @@ class JobListView(LoginRequiredMixin, SingleTableMixin, ListView):
     paginate_by = 10
 
     def get_queryset(self):
-        queryset = super().get_queryset().order_by("-created_at")
+        queryset = (
+            super()
+            .get_queryset()
+            .annotate(exports_count=Count("exports"))
+            .order_by("-created_at")
+        )
         search_query = self.request.GET.get("job_search", "").strip()
         created_at_query = self.request.GET.get("job_created_at", "").strip()
         job_status_selected = self.request.GET.get("job_status", "").strip()

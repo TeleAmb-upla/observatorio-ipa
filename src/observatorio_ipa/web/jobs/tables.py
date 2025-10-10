@@ -23,22 +23,12 @@ class StatusColumn(tables.Column):
 
 class JobsTable(tables.Table):
     job_status = StatusColumn(orderable=True)
+    id = tables.Column(orderable=True)
+    exports = tables.Column(
+        verbose_name="Exports", accessor="exports_count", orderable=True
+    )
     created_at = tables.Column(orderable=True)
     updated_at = tables.Column(orderable=True)
-
-    # def render_job_status(self, value):
-    #     color_class = ""
-    #     if value == "COMPLETED":
-    #         color_class = "bg-success text-white"
-    #     elif value == "FAILED":
-    #         color_class = "bg-danger text-white"
-    #     elif value == "RUNNING":
-    #         color_class = "bg-secondary text-white"
-    #     if color_class:
-    #         return mark_safe(
-    #             f'<span class="{color_class}" style="display:inline-block; padding:0.25em 0.75em; border-radius:1em; font-weight:500;">{value}</span>'
-    #         )
-    #     return value
 
     def render_id(self, value):
         url = reverse("job_detail", args=[value])
@@ -48,9 +38,8 @@ class JobsTable(tables.Table):
 
     class Meta:
         model = Job
-        template_name = "django_tables2/bootstrap5.html"
         attrs = {"class": "table osn-table"}
-        fields = ("job_status", "id", "created_at", "updated_at")
+        fields = ("job_status", "id", "exports", "created_at", "updated_at")
         order_by = ("-created_at",)
 
 
@@ -70,7 +59,6 @@ class ExportsTable(tables.Table):
 
     class Meta:
         model = Export
-        template_name = "django_tables2/bootstrap5.html"
         attrs = {"class": "table osn-table"}
         fields = ("state", "type", "name", "target", "created_at", "updated_at")
         order_by = (
