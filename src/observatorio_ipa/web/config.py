@@ -5,9 +5,9 @@ from observatorio_ipa.core.config import WebSettings, AutoDBSettings
 
 
 def web_settings_init() -> WebSettings:
-    toml_path = os.getenv("IPA_WEB_SETTINGS_TOML")
+    toml_path = os.getenv("IPA_WEB_CONFIG_TOML")
     if not toml_path:
-        raise ValueError("The IPA_WEB_SETTINGS_TOML environment variable is not set.")
+        raise ValueError("The IPA_WEB_CONFIG_TOML environment variable is not set.")
 
     toml_path_ = Path(toml_path)
     with open(toml_path_, "rb") as f:

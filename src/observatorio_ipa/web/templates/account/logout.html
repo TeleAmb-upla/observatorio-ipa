@@ -3,13 +3,15 @@
 
 {% block content %}
 <div class="flex-grow-1 d-flex align-items-center justify-content-center">
-  <main class="form-signin w-100" style="max-width: 330px; padding: 1rem;">
-    <form method="post">
-      <h1 class="h3 mb-3 fw-normal text-center">{% trans "Sign Out" %}</h1>
-      <p class="mb-4 text-center">{% trans "Are you sure you want to sign out?" %}</p>
-      {% csrf_token %}
-      <button class="btn btn-danger w-100 py-2" type="submit">{% trans "Sign Out" %}</button>
-    </form>
+  <main class="w-100 px-1 px-sm-4" style="max-width: 100%; padding-top: 1rem; padding-bottom: 1rem;">
+    <div class="bg-white shadow rounded-4 p-3 p-sm-4 mx-auto" style="max-width: 330px;">
+      <form method="post">
+        <h1 class="h3 mb-3 fw-normal text-center">{% trans "Sign Out" %}</h1>
+        <p class="mb-4 text-center">{% trans "Are you sure you want to sign out?" %}</p>
+        {% csrf_token %}
+        <button class="btn btn-danger w-100 py-2" type="submit">{% trans "Sign Out" %}</button>
+      </form>
+    </div>
   </main>
 </div>
 {% endblock %}

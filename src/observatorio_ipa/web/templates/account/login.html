@@ -1,26 +1,79 @@
 {% extends "_base.html" %}
 {% load i18n %}
+{% load socialaccount %}
 
+{% block head_title %}{% trans "Sign In" %}{% endblock head_title %}
 
 {% block content %}
 <div class="flex-grow-1 d-flex align-items-center justify-content-center">
-    <main class="form-signin w-100" style="max-width: 330px; padding: 1rem;">
-        <form method="post">
-            <h1 class="h3 mb-3 fw-normal text-left">{% trans "Sign In" %}</h1>
+    <main class="w-100 px-1 px-sm-4" style="max-width: 100%; padding-top: 1rem; padding-bottom: 1rem;">
+        <div class="bg-white shadow rounded-4 p-3 p-sm-4 mx-auto" style="max-width: 330px;">
+            <!-- Local User Login Form -->
+            <form method="post">
+            {% get_providers as socialaccount_providers %}
+            {% if not socialaccount_providers %}
+                <h1 class="h3 mb-3 fw-normal text-center">{% trans "Sign In" %}</h1>
+            {% else %}
+                <h2 class="h5 mb-3 fw-normal text-center">{% trans "Sign in with local account" %}</h2>
+            {% endif %}
             {% csrf_token %}
             {% if form.non_field_errors %}
                 <div class="alert alert-danger">{{ form.non_field_errors }}</div>
             {% endif %}
             <div class="form-floating mb-2">
-                <input type="text" name="login" class="form-control" id="id_login" placeholder="name@example.com" required autofocus>
+                <input type="text" name="login" class="form-control{% if form.login.errors %} is-invalid{% endif %}" id="id_login" placeholder="name@example.com" required autofocus>
                 <label for="id_login">{% trans "Email or Username" %}</label>
+                {% if form.login.errors %}
+                    <div class="invalid-feedback">
+                        {{ form.login.errors }}
+                    </div>
+                {% endif %}
             </div>
             <div class="form-floating mb-2">
-                <input type="password" name="password" class="form-control" id="id_password" placeholder="Password" required>
+                <input type="password" name="password" class="form-control{% if form.password.errors %} is-invalid{% endif %}" id="id_password" placeholder="Password" required>
                 <label for="id_password">{% trans "Password" %}</label>
+                {% if form.password.errors %}
+                    <div class="invalid-feedback">
+                        {{ form.password.errors }}
+                    </div>
+                {% endif %}
             </div>
+            {{ redirect_field }}
             <button class="btn btn-primary w-100 py-2" type="submit">{% trans "Sign In" %}</button>
         </form>
+
+        <!-- OAuth Section (only show if OAuth is enabled) -->
+        {% get_providers as socialaccount_providers %}
+        {% if socialaccount_providers %}
+            <!-- Divider -->
+            <div class="d-flex align-items-center mb-3">
+                <hr class="flex-grow-1">
+                <span class="px-3 text-muted small">{% trans "OR" %}</span>
+                <hr class="flex-grow-1">
+            </div>
+            <!-- Providers -->
+            <div class="mb-4">
+                {% if GCP_OAUTH_CLIENT_ID %}
+                <a href="{% provider_login_url 'google' %}" class="btn btn-danger w-100 py-2 mb-2">
+                    <i class="bi bi-google me-2"></i>{% trans "Sign in with Google" %}
+                </a>
+                <div class="text-center mb-2">
+                    <small class="text-muted">{% trans "Access restricted to GCP project members" %}</small>
+                </div>
+                {% endif %}
+            
+                {% if GITHUB_OAUTH_CLIENT_ID %}
+                <a href="{% provider_login_url 'github' %}" class="btn btn-dark w-100 py-2 mb-2">
+                    <i class="bi bi-github me-2"></i>{% trans "Sign in with GitHub" %}
+                </a>
+                <div class="text-center mb-3">
+                    <small class="text-muted">{% trans "Access restricted to repository access" %}</small>
+                </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        </div>
     </main>
 </div>
 {% endblock %}

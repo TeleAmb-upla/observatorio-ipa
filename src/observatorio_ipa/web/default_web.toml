@@ -21,3 +21,9 @@ db_name = "observatorio_ipa.sqlite3"
 # port = 5432
 # user_file = "/run/secrets/db_user.txt"
 # password_file = "/run/secrets/db_passwd.txt"
+
+[gcp_oauth]
+enable_gcp_oauth = false
+# oauth_client_id_file = "path/to/file.txt"
+# oauth_client_secret_file = "path/to/file.txt"
+# gcp_project_id = "your-gcp-project-id"

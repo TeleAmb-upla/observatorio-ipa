@@ -1,0 +1,46 @@
+{% extends "_base.html" %}
+{% load i18n %}
+{% load allauth %}
+
+{% block content %}
+<div class="flex-grow-1 d-flex align-items-center justify-content-center">
+    <main class="w-100 px-1 px-sm-4" style="max-width: 100%; padding-top: 1rem; padding-bottom: 1rem;">
+        <div class="bg-white shadow rounded-4 p-3 p-sm-4 mx-auto" style="max-width: 330px;">
+            <div class="text-center mb-4">
+                <i class="bi bi-exclamation-triangle text-danger" style="font-size: 3rem;"></i>
+            </div>
+            
+            <h1 class="h3 mb-3 fw-normal text-center text-danger">
+                {% trans "Third-Party Login Failure" %}
+            </h1>
+            
+            <div class="alert alert-danger mb-4">
+                <i class="bi bi-x-circle me-2"></i>
+                {% trans "An error occurred while attempting to login via your third-party account." %}
+            </div>
+            
+            {% if auth_error.code %}
+                <div class="alert alert-warning mb-4">
+                    <strong>{% trans "Error details:" %}</strong><br>
+                    <small class="text-muted">{{ auth_error.code }}</small>
+                </div>
+            {% endif %}
+            
+            <div class="d-grid gap-2">
+                <a href="{% url 'account_login' %}" class="btn btn-primary">
+                    <i class="bi bi-arrow-left me-2"></i>{% trans "Back to login" %}
+                </a>
+                <a href="{% url 'home' %}" class="btn btn-outline-secondary">
+                    <i class="bi bi-house me-2"></i>{% trans "Go to homepage" %}
+                </a>
+            </div>
+            
+            <div class="text-center mt-4">
+                <small class="text-muted">
+                    {% trans "If this problem persists, please contact support." %}
+                </small>
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "_base.html" %}
+{% load i18n %}
+{% load allauth %}
+
+{% block content %}
+<div class="flex-grow-1 d-flex align-items-center justify-content-center">
+    <main class="w-100 px-1 px-sm-4" style="max-width: 100%; padding-top: 1rem; padding-bottom: 1rem;">
+        <div class="bg-white shadow rounded-4 p-3 p-sm-4 mx-auto" style="max-width: 400px;">
+            {% if process == "connect" %}
+                <h1 class="h3 mb-3 fw-normal text-center">
+                    {% blocktranslate with provider.name as provider %}Connect {{ provider }}{% endblocktranslate %}
+                </h1>
+                <div class="alert alert-info mb-4">
+                    <i class="bi bi-info-circle me-2"></i>
+                    {% blocktranslate with provider.name as provider %}You are about to connect a new third-party account from {{ provider }}.{% endblocktranslate %}
+                </div>
+            {% else %}
+                <h1 class="h3 mb-3 fw-normal text-center">
+                    {% blocktranslate with provider.name as provider %}Sign In Via {{ provider }}{% endblocktranslate %}
+                </h1>
+                <div class="alert alert-primary mb-4">
+                    <i class="bi bi-shield-check me-2"></i>
+                    {% blocktranslate with provider.name as provider %}You are about to sign in using a third-party account from {{ provider }}.{% endblocktranslate %}
+                </div>
+            {% endif %}
+            
+            <form method="post" class="text-center">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary w-100 py-2">
+                    <i class="bi bi-arrow-right me-2"></i>{% trans "Continue" %}
+                </button>
+            </form>
+            
+            <div class="text-center mt-3">
+                <a href="{% url 'account_login' %}" class="text-muted small">
+                    <i class="bi bi-arrow-left me-1"></i>{% trans "Back to login" %}
+                </a>
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}

@@ -47,6 +47,9 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "allauth",
     "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.github",
     "debug_toolbar",
     "crispy_forms",
     "crispy_bootstrap5",
@@ -83,6 +86,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "webapp.context_processors.oauth_context",
             ],
         },
     },
@@ -176,29 +180,97 @@ AUTH_USER_MODEL = "accounts.User"
 
 # ----- Django Allauth Configuration -----
 SITE_ID = 1
+ACCOUNT_SIGNUP_ALLOWED = False
+ACCOUNT_LOGIN_METHODS = {"username", "email"}
+# ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_EMAIL_VERIFICATION = "none"
+# ACCOUNT_AUTHENTICATION_METHOD = "email"
 ACCOUNT_SESSION_REMEMBER = True
 LOGIN_REDIRECT_URL = "home"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
-ACCOUNT_SIGNUP_ALLOWED = False
 ACCOUNT_PASSWORD_CHANGE_REDIRECT_URL = "home"
+# Disable signup form and redirect
+# ACCOUNT_SIGNUP_FORM_CLASS = None
+# ACCOUNT_SIGNUP_PASSWORD_ENTER_TWICE = False
 # EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-# Debug Toolbar Configuration
+# GCP Oauth settings
+GCP_OAUTH_ENABLED = runtime_web_settings.gcp_oauth.enable_gcp_oauth
+
+if oauth_client_id_file := runtime_web_settings.gcp_oauth.oauth_client_id_file:
+    GCP_OAUTH_CLIENT_ID = oauth_client_id_file.read_text().strip()
+else:
+    GCP_OAUTH_CLIENT_ID = None
+
+if oauth_secret_file := runtime_web_settings.gcp_oauth.oauth_client_secret_file:
+    GCP_OAUTH_SECRET = oauth_secret_file.read_text().strip()
+else:
+    GCP_OAUTH_SECRET = None
+
+GCP_PROJECT_ID = runtime_web_settings.gcp_oauth.gcp_project_id
+
+# GitHub OAuth settings
+GITHUB_OAUTH_ENABLED = runtime_web_settings.github_oauth.enable_github_oauth
+
+if github_client_id_file := runtime_web_settings.github_oauth.oauth_client_id_file:
+    GITHUB_OAUTH_CLIENT_ID = github_client_id_file.read_text().strip()
+else:
+    GITHUB_OAUTH_CLIENT_ID = None
+
+if github_secret_file := runtime_web_settings.github_oauth.oauth_client_secret_file:
+    GITHUB_OAUTH_SECRET = github_secret_file.read_text().strip()
+else:
+    GITHUB_OAUTH_SECRET = None
+
+GITHUB_REPOSITORY_OWNER = runtime_web_settings.github_oauth.repository_owner
+GITHUB_REPOSITORY_NAME = runtime_web_settings.github_oauth.repository_name
+
+# Configure social account providers
+SOCIALACCOUNT_PROVIDERS = {}
+
+if GCP_OAUTH_ENABLED and GCP_OAUTH_CLIENT_ID and GCP_OAUTH_SECRET:
+    SOCIALACCOUNT_PROVIDERS["google"] = {
+        "SCOPE": [
+            "profile",
+            "email",
+            "https://www.googleapis.com/auth/cloud-platform.read-only",
+        ],
+        "AUTH_PARAMS": {
+            "access_type": "online",
+        },
+        "VERIFIED_EMAIL": True,
+        "APP": {"client_id": GCP_OAUTH_CLIENT_ID, "secret": GCP_OAUTH_SECRET},
+    }
+
+if GITHUB_OAUTH_ENABLED and GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_SECRET:
+    SOCIALACCOUNT_PROVIDERS["github"] = {
+        "SCOPE": [
+            "read:user",
+            "user:email",
+        ],
+        "APP": {"client_id": GITHUB_OAUTH_CLIENT_ID, "secret": GITHUB_OAUTH_SECRET},
+    }
+
+# Set custom adapter if any OAuth provider is configured
+if SOCIALACCOUNT_PROVIDERS:
+    SOCIALACCOUNT_ADAPTER = "webapp.adapters.CustomSocialAccountAdapter"
+
+
+# ---- Debug Toolbar Configuration -----
 INTERNAL_IPS = [
     "127.0.0.1",
     "localhost",
 ]
 
-# Crispy Forms Configuration
+# ----- Crispy Forms Configuration -----
 CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
 CRISPY_TEMPLATE_PACK = "bootstrap5"
 
-# Django Tables2 Configuration
+# ----- Django Tables2 Configuration -----
 DJANGO_TABLES2_TEMPLATE = "django_tables2/bootstrap5.html"
 
 
-# whitenoise configuration
+# ----- Whitenoise Configuration -----
 STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",

@@ -1,0 +1,111 @@
+{% extends "_base.html" %}
+{% load i18n %}
+{% load allauth %}
+{% load socialaccount %}
+
+{% block head_title %}{% trans "Account Connections" %}{% endblock head_title %}
+
+{% block content %}
+<div class="flex-grow-1 d-flex align-items-center justify-content-center">
+    <main class="w-100 px-1 px-sm-4" style="max-width: 100%; padding-top: 1rem; padding-bottom: 1rem;">
+        <div class="bg-white shadow rounded-4 p-3 p-sm-4 mx-auto" style="max-width: 600px;">
+            <h1 class="h3 mb-4 fw-normal text-center">
+                <i class="bi bi-link-45deg me-2"></i>{% trans "Account Connections" %}
+            </h1>
+            
+            {% if form.accounts %}
+                <p>
+                    {% blocktrans %}You can sign in to your account using any of the following third-party accounts:{% endblocktrans %}
+                </p>
+                
+                <form method="post" action="{% url 'socialaccount_connections' %}" class="mb-4">
+                    {% csrf_token %}
+                    
+                    {% if form.non_field_errors %}
+                        <div class="alert alert-danger">
+                            {{ form.non_field_errors }}
+                        </div>
+                    {% endif %}
+                    
+                    <div class="card">
+                        <div class="card-body">
+                            {% for account in form.accounts %}
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="radio" 
+                                           name="account" value="{{ account.pk }}" 
+                                           id="id_account_{{ account.pk }}">
+                                    <label class="form-check-label d-flex align-items-center" 
+                                           for="id_account_{{ account.pk }}">
+                                        {% if account.provider == 'github' %}
+                                            <i class="bi bi-github me-2"></i>
+                                        {% elif account.provider == 'google' %}
+                                            <i class="bi bi-google me-2"></i>
+                                        {% else %}
+                                            <i class="bi bi-person me-2"></i>
+                                        {% endif %}
+                                        <div class="flex-grow-1">
+                                            <strong>{{ account.get_provider_account }}</strong>
+                                            <small class="text-muted">
+                                                <span class="badge bg-secondary">{{ account.get_provider.name }}</span>
+                                            </small>
+                                        </div>
+                                    </label>
+                                </div>
+                            {% endfor %}
+                            
+                            {% if form.account.errors %}
+                                <div class="alert alert-danger">
+                                    {{ form.account.errors }}
+                                </div>
+                            {% endif %}
+                        </div>
+                        <div class="card-footer text-center">
+                            <button type="submit" class="btn btn-danger">
+                                <i class="bi bi-trash me-2"></i>{% trans 'Remove Accounts' %}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            {% else %}
+                <div class="alert alert-warning text-center mb-4">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    {% trans 'You currently have no third-party accounts connected to this account.' %}
+                </div>
+            {% endif %}
+            
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="bi bi-plus-circle me-2"></i>{% trans 'Add a Third-Party Account' %}
+                    </h6>
+                </div>
+                <div class="card-body">
+                    {% get_providers as socialaccount_providers %}
+                    {% if socialaccount_providers %}
+                        <div class="d-grid gap-2">
+                            {% for provider in socialaccount_providers %}
+                                {% if provider.id == 'github' and GITHUB_OAUTH_CLIENT_ID %}
+                                    <a href="{% provider_login_url provider.id process='connect' %}" 
+                                       class="btn btn-outline-dark">
+                                        <i class="bi bi-github me-2"></i>{% blocktrans with provider.name as provider %}Connect {{ provider }}{% endblocktrans %}
+                                    </a>
+                                {% elif provider.id == 'google' and GCP_OAUTH_CLIENT_ID %}
+                                    <a href="{% provider_login_url provider.id process='connect' %}" 
+                                       class="btn btn-outline-danger">
+                                        <i class="bi bi-google me-2"></i>{% blocktrans with provider.name as provider %}Connect {{ provider }}{% endblocktrans %}
+                                    </a>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="text-center text-muted">
+                            <i class="bi bi-x-circle me-2"></i>
+                            {% trans "No third-party providers are currently available." %}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}

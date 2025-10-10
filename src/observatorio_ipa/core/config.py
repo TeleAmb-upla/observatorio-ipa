@@ -602,6 +602,45 @@ class GCPOauthConfig(BaseSettings):
         return self
 
 
+class GitHubOauthConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+    )
+    enable_github_oauth: bool = Field(
+        default=False, description="Enable GitHub OAuth authentication"
+    )
+    oauth_client_id_file: FilePath | None = Field(
+        default=None, description="GitHub OAuth Client ID"
+    )
+    oauth_client_secret_file: FilePath | None = Field(
+        default=None, description="GitHub OAuth Client Secret"
+    )
+    repository_owner: str | None = Field(
+        default=None, description="GitHub repository owner for access control"
+    )
+    repository_name: str | None = Field(
+        default=None, description="GitHub repository name for access control"
+    )
+
+    @model_validator(mode="after")
+    def check_required_fields(self):
+        if self.enable_github_oauth:
+            missing = []
+            if not self.oauth_client_id_file:
+                missing.append("oauth_client_id_file")
+            if not self.oauth_client_secret_file:
+                missing.append("oauth_client_secret_file")
+            if not self.repository_owner:
+                missing.append("repository_owner")
+            if not self.repository_name:
+                missing.append("repository_name")
+            if missing:
+                raise ValueError(
+                    f"When enable_github_oauth is True, the following fields must be set: {', '.join(missing)}"
+                )
+        return self
+
+
 class WebSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
@@ -614,6 +653,7 @@ class WebSettings(BaseSettings):
         db_name="observatorio_ipa_web.db",
     )
     gcp_oauth: GCPOauthConfig
+    github_oauth: GitHubOauthConfig = GitHubOauthConfig()
 
 
 def _deep_merge_dicts(a: dict, b: Mapping) -> dict:
