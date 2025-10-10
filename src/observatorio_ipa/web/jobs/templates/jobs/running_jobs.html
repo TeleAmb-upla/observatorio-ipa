@@ -16,8 +16,9 @@
             </div>
             <!-- Date picker and button: stacked on xs, inline otherwise -->
             <div class="col-12 col-lg-6 d-flex flex-row flex-wrap">
-              <input type="date" name="running_job_created_at" class="form-control me-2 mb-2 mb-lg-0" value="{{ running_job_created_at_query }}" style="max-width: 180px;">
-              <button class="btn btn-primary mb-2 mb-lg-0" type="submit">Search</button>
+              <input type="date" name="running_job_created_at" class="form-control me-2 mb-0" 
+              {% if running_job_created_at_query %} value="{{ running_job_created_at_query }}" {% endif %} style="max-width: 180px;" >
+              <button class="btn btn-primary mb-0" type="submit">Search</button>
               {% if running_job_search_query or running_job_created_at_query %}
                 <a href="?" class="btn btn-outline-secondary ms-2 mb-2 mb-lg-0">Clear</a>
               {% endif %}
