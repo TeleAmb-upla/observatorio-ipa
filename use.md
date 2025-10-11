@@ -101,3 +101,77 @@ python manage.py createsuperuser
 Follow the steps to create a superuser account to admin the Web application. Test the login at the web applications admin page: http://localhost:8000/admin or http://<your-domain>/admin
 If all is working correctly you should be able to login. Once logged in you can log out exit the container.
 
+## OAuth Access
+
+The Web Interface supports OAuth authentication to provide secure access control. Users can authenticate with external providers while maintaining local account support as a fallback.
+
+### GitHub OAuth Authentication
+
+GitHub OAuth allows you to restrict access to users who have access to a specific repository. This provides automatic access control based on your project's existing GitHub permissions.
+
+#### Prerequisites
+
+Before configuring GitHub OAuth, you need to:
+
+1. **Create a GitHub OAuth App** - Follow the [GitHub OAuth App creation guide](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)
+2. **Configure OAuth App Settings**:
+   - **Authorization callback URL**: `http://localhost:8000/accounts/github/login/callback/` (for development) or `https://yourdomain.com/accounts/github/login/callback/` (for production)
+   - **Homepage URL**: Your application's URL
+
+For detailed steps on creating OAuth credentials, refer to GitHub's official documentation: [Authorizing OAuth Apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)
+
+#### Configuration
+
+Add the following section to your web configuration TOML file:
+
+```toml
+[github_oauth]
+enable_github_oauth = true
+oauth_client_id_file = "/path/to/secrets/github_oauth_client_id.txt"
+oauth_client_secret_file = "/path/to/secrets/github_oauth_client_secret.txt"
+repository_owner = "your-organization"
+repository_name = "your-repository"
+```
+
+#### Configuration Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `enable_github_oauth` | boolean | Yes | Enable or disable GitHub OAuth authentication |
+| `oauth_client_id_file` | string (file path) | Yes* | Path to file containing GitHub OAuth Client ID |
+| `oauth_client_secret_file` | string (file path) | Yes* | Path to file containing GitHub OAuth Client Secret |
+| `repository_owner` | string | Yes* | GitHub username or organization that owns the repository |
+| `repository_name` | string | Yes* | Name of the repository to check access permissions |
+
+*Required when `enable_github_oauth` is `true`
+
+#### Access Control
+
+When GitHub OAuth is enabled, the system will:
+
+1. Authenticate users through GitHub OAuth
+2. Verify the user has read access to the specified repository
+3. Grant access to users who can view the repository (collaborators, contributors, organization members)
+4. Deny access to users who cannot access the repository
+
+**Note**: Users need read access to the repository, which includes:
+
+- Repository collaborators (any permission level)
+- Organization members with repository access
+- Users who have contributed to public repositories
+- Anyone for public repositories (if that's desired behavior)
+
+#### Security Considerations
+
+- **Repository Visibility**: The target repository can be public or private
+- **Token Scope**: The application requests minimal scopes (`read:user`, `user:email`, `read:org`)
+- **API Rate Limits**: GitHub API rate limits apply to contributor verification
+- **Fallback Authentication**: Local user accounts remain available when OAuth is configured
+
+#### Troubleshooting
+
+Common issues and solutions:
+
+- **"No repository access"**: Ensure the user has been added as a collaborator or has access through organization membership
+- **"Repository not found"**: Verify `repository_owner` and `repository_name` are correct
+- **OAuth configuration errors**: Check that client ID and secret files exist and contain valid credentials
