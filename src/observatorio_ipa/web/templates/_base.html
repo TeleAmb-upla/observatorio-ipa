@@ -1,6 +1,7 @@
 <!-- templates/_base.html -->
 {% load static %}
 {% load account %}
+{% load socialaccount %}
 
 <!DOCTYPE html>
 <html>
@@ -62,10 +63,12 @@
                                 <i class="bi bi-key me-2"></i>Change Password
                             </a></li>
                             {% endif %}
-                            
-                            <li><a class="dropdown-item" href="{% url 'socialaccount_connections' %}">
-                                <i class="bi bi-link-45deg me-2"></i>Social Connections
-                            </a></li>
+                                {% get_providers as socialaccount_providers %}
+                                {% if socialaccount_providers %}
+                                <li><a class="dropdown-item" href="{% url 'socialaccount_connections' %}">
+                                    <i class="bi bi-link-45deg me-2"></i>Social Connections
+                                </a></li>
+                                {% endif %}
                             
                             <li><hr class="dropdown-divider"></li>
                             
