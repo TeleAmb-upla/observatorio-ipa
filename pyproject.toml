@@ -1,6 +1,6 @@
 [project]
 name = "observatorio-ipa"
-version = "0.5.2"
+version = "0.5.3"
 description = "Image Processing Automation for Observatorio Satelital de nieves (OSN)"
 
 authors = [
@@ -39,7 +39,7 @@ classifiers = [
 ]
 
 [tool.webapp]
-version = "0.3.0"
+version = "0.4.0"
 
 [project.urls]
 homepage = "https://github.com/TeleAmb-upla/nieves_auto"
@@ -83,13 +83,17 @@ ipa = [
 web = [
     "crispy-bootstrap5>=2025.6",
     "django>=5.2,<6.0",
-    "django-allauth>=65.11.2",
+    "django-allauth[socialaccount]>=65.11.2",
     "django-crispy-forms>=2.4",
     "django-debug-toolbar>=6.0.0",
     "django-filter>=25.1",
     "django-tables2>=2.7.5",
     "gunicorn>=23.0.0",
     "whitenoise[brotli]>=6.10.0",
+    "requests>=2.32.0",
+    #"google-api-python-client>=2.126.0",
+    "google-auth>=2.29.0",
+    "google-cloud-resource-manager>=1.14.2",
 ]
 
 [tool.uv]
