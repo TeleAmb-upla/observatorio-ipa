@@ -150,21 +150,10 @@ class LogSettings(BaseSettings):
     )
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
-    file: Annotated[
-        Path,
-        Field(
-            default=Path("./osn_ipa.log"),
-            description="Path to the log file",
-        ),
-    ]
-    encoding: Annotated[str, Field(default="utf-8")]
-    format: Annotated[
-        str,
-        Field(
-            default="%(asctime)s %(name)s %(levelname)s: %(message)s",
-        ),
-    ]
-    date_format: Annotated[str, Field(default="%Y-%m-%d %H:%M:%S")]
+    file: Path = Path("./osn_ipa.log")
+    encoding: str = "utf-8"
+    format: str = "%(asctime)s %(name)s %(levelname)s: %(message)s"
+    date_format: str = "%Y-%m-%d %H:%M:%S"
 
 
 class ImageExportSettings(BaseSettings):
@@ -524,8 +513,8 @@ class AppSettings(BaseSettings):
         return values
 
     google: GoogleSettings
-    email: EmailSettings
-    logging: LogSettings
+    email: EmailSettings = EmailSettings()
+    logging: LogSettings = LogSettings()
     image_export: ImageExportSettings
     stats_export: StatsExportSettings
     automation: AutoRunSettings
@@ -652,7 +641,7 @@ class WebSettings(BaseSettings):
         db_path=DEFAULT_DB_PATH,
         db_name="observatorio_ipa_web.db",
     )
-    gcp_oauth: GCPOauthConfig
+    gcp_oauth: GCPOauthConfig = GCPOauthConfig()
     github_oauth: GitHubOauthConfig = GitHubOauthConfig()
 
 
