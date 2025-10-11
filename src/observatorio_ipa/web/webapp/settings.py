@@ -248,6 +248,7 @@ if GITHUB_OAUTH_ENABLED and GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_SECRET:
         "SCOPE": [
             "read:user",
             "user:email",
+            "repo",
         ],
         "APP": {"client_id": GITHUB_OAUTH_CLIENT_ID, "secret": GITHUB_OAUTH_SECRET},
     }
@@ -317,3 +318,4 @@ LOGGING = {
 
 
 CSRF_TRUSTED_ORIGINS = [] + runtime_web_settings.django.csrf_trusted_origins
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

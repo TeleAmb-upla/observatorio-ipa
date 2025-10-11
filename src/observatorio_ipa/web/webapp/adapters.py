@@ -91,9 +91,7 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
             messages.error(
                 request, "GitHub OAuth authentication is not properly configured."
             )
-            raise ImmediateHttpResponse(
-                HttpResponseForbidden("GitHub OAuth not configured")
-            )
+            raise ImmediateHttpResponse(redirect("socialaccount_login_error"))
 
         token = self._get_token(request, social_login)
 
@@ -107,15 +105,13 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
                     request,
                     f"Access denied. You must have access to the {repo_owner}/{repo_name} repository.",
                 )
-                raise ImmediateHttpResponse(
-                    HttpResponseForbidden("No repository access")
-                )
+                raise ImmediateHttpResponse(redirect("socialaccount_login_error"))
         except Exception as e:
             logger.error(f"Error checking GitHub repository access: {str(e)}")
-            messages.error(request, "Error validating GitHub repository access.")
-            raise ImmediateHttpResponse(
-                HttpResponseForbidden("GitHub repository access validation failed")
-            )
+            # Only show a generic error if no specific access denial message was sent
+            if not messages.get_messages(request):
+                messages.error(request, "Error validating GitHub repository access.")
+            raise ImmediateHttpResponse(redirect("socialaccount_login_error"))
 
     def _get_token(self, request: HttpRequest, social_login: SocialLogin) -> str:
         # Get user's access token
