@@ -79,7 +79,22 @@
             {% endif %}
         </div>
     </nav>
+    <!-- Main Content -->
     <div class="container-lg mt-3">
+        <!-- Flash Messages -->
+        {% if messages %}
+        <div class="row justify-content-end">
+            <div class="col-12 col-md-8 col-lg-6 text-end">
+                {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show d-inline-block mb-2" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        <!-- Page Specific Content -->
         {% block content %}
         {% endblock content %}
     </div>

@@ -3,12 +3,14 @@ import requests
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.socialaccount.models import SocialLogin
 from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.account.models import EmailAddress
 from django.http import HttpResponseForbidden, HttpRequest
 from django.contrib import messages
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.shortcuts import redirect
 from google.oauth2 import credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from google.cloud import resourcemanager_v3
 
 logger = logging.getLogger("osn-ipa")
 
@@ -17,7 +19,17 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
     """Custom adapter to restrict access to GCP project members and GitHub repository contributors."""
 
     def pre_social_login(self, request: HttpRequest, social_login: SocialLogin) -> None:
-        """Check if user has access to the configured resources before allowing login."""
+        """Check if user has access to the configured resources before allowing login. Fail gracefully if email exists."""
+
+        email = social_login.account.extra_data.get("email")
+        User = get_user_model()
+        # If the email exists, redirect to Allauth's built-in error view
+        if email and User.objects.filter(email=email).exists():
+            messages.error(
+                request,
+                "Unable to log in with this social account.",
+            )
+            raise ImmediateHttpResponse(redirect("socialaccount_login_error"))
 
         provider = social_login.account.provider
 
@@ -119,22 +131,18 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
         return social_login.token.token
 
     def _check_gcp_project_access(self, token: str, project_id: str) -> bool:
-        """Check if user has access to the specified GCP project."""
+        """Check if user has access to the specified GCP project using Cloud Client Library."""
         try:
             creds = credentials.Credentials(token)
-            service = build("cloudresourcemanager", "v1", credentials=creds)
-            project = service.projects().get(projectId=project_id).execute()
+            client = resourcemanager_v3.ProjectsClient(credentials=creds)
+            project = client.get_project(name=f"projects/{project_id}")
             logger.info(
-                f"User has access to project: {project.get('name', project_id)}"
+                f"User has access to project: {getattr(project, 'display_name', project_id)}"
             )
             return True
-        except HttpError as e:
-            if e.resp.status == 403:
-                return False
-            logger.error(f"HTTP error checking project access: {e}")
-            return False
         except Exception as e:
-            logger.error(f"Unexpected error checking project access: {e}")
+            # PermissionDenied or NotFound means no access
+            logger.error(f"Error checking project access: {e}")
             return False
 
     def _check_github_repo_access(
@@ -163,16 +171,22 @@ class CustomSocialAccountAdapter(DefaultSocialAccountAdapter):
             # This works for both public repos and private repos the user has access to
             repo_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
             repo_response = requests.get(repo_url, headers=headers)
-            
+
             if repo_response.status_code == 200:
-                logger.info(f"User {user_login} has read access to {repo_owner}/{repo_name}")
+                logger.info(
+                    f"User {user_login} has read access to {repo_owner}/{repo_name}"
+                )
                 return True
             elif repo_response.status_code == 404:
                 # Repository not found or user doesn't have access
-                logger.info(f"User {user_login} does not have access to {repo_owner}/{repo_name}")
+                logger.info(
+                    f"User {user_login} does not have access to {repo_owner}/{repo_name}"
+                )
                 return False
             else:
-                logger.error(f"Unexpected response when checking repository access: {repo_response.status_code}")
+                logger.error(
+                    f"Unexpected response when checking repository access: {repo_response.status_code}"
+                )
                 return False
 
         except requests.RequestException as e:
