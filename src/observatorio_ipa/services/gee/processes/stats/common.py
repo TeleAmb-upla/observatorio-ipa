@@ -125,6 +125,41 @@ def _ee_merge_feature_collections(
     return ee_merged_collections
 
 
+def _ee_calc_SP_temporal_stats(
+    ee_icollection: ee.imagecollection.ImageCollection,
+) -> ee.image.Image:
+    """Calculates Temporal statistics for Snow Persistence across an Time Series Image collection.
+
+    Calculates pixel level mean and percentiles (p0, p25, p50, p75, p100) for Snow Persistence. Requires 'SP'
+    band.
+
+    Resulting image has the following bands SP_mean, SP_p0, SP_p5, SP_p25, SP_p50, SP_p75, SP_p90, SP_p100.
+
+    Args:
+        ee_icollection: Time Series ImageCollection with SP bands.
+    Returns:
+        ee.image.Image: Image with pixel level SP statistics.
+
+    """
+
+    # Calculate mean pixel values for SP across years
+    # Compute mean and stddev for SP in one go
+    ee_stats_img: ee.image.Image = ee_icollection.select("SP").reduce(
+        ee.reducer.Reducer.mean()
+        .combine(ee.reducer.Reducer.stdDev(), "", True)
+        .combine(
+            ee.reducer.Reducer.percentile(
+                [0, 5, 25, 50, 75, 90, 100],
+                ["p0", "p5", "p25", "p50", "p75", "p90", "p100"],
+            ),
+            "",
+            True,
+        )
+    )
+
+    return ee_stats_img
+
+
 def _ee_calc_cci_sci_temporal_stats(
     ee_icollection: ee.imagecollection.ImageCollection,
 ) -> ee.image.Image:
