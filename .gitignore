@@ -171,3 +171,6 @@ manifests/
 *.sqlite3
 *.log
 heartbeat/
+
+# Snyk Security Extension - AI Rules (auto-generated)
+.github\instructions\snyk_rules.instructions.md
