@@ -121,35 +121,32 @@ def _ee_calc_year_trend_per_basin(
     #! Slope bins are later re-named with n00 and p00 as valid options. meaning [-0.99, -0.01] and [0.01, 0.99]
     #! are valid bins but negatives got bumped by one integer to avoid having two 0 bins
     #! gt(0) should probably be gte(0) to make it explicit
+
+    # Slope Bins from [-3.5 to 3.5] with 0.5 increments
+
     # fmt: off
     ee_slope_bin_img = (
         ee_significant_slopes_img
-        .where(ee_significant_slopes_img.lte(-10), -11) # n10
-        .where(ee_significant_slopes_img.gt(-10).And(ee_significant_slopes_img.lte(-9)),-10,) # n09
-        .where(ee_significant_slopes_img.gt(-9).And(ee_significant_slopes_img.lte(-8)), -9) # n08
-        .where(ee_significant_slopes_img.gt(-8).And(ee_significant_slopes_img.lte(-7)), -8) # n07
-        .where(ee_significant_slopes_img.gt(-7).And(ee_significant_slopes_img.lte(-6)), -7) # n06
-        .where(ee_significant_slopes_img.gt(-6).And(ee_significant_slopes_img.lte(-5)), -6) # n05
-        .where(ee_significant_slopes_img.gt(-5).And(ee_significant_slopes_img.lte(-4)), -5) # n04
-        .where(ee_significant_slopes_img.gt(-4).And(ee_significant_slopes_img.lte(-3)), -4) # n03
-        .where(ee_significant_slopes_img.gt(-3).And(ee_significant_slopes_img.lte(-2)), -3) # n02
-        .where(ee_significant_slopes_img.gt(-2).And(ee_significant_slopes_img.lte(-1)), -2) # n01 
-        .where(ee_significant_slopes_img.gt(-1).And(ee_significant_slopes_img.lt(0)), -1) # n00 
-        .where(ee_significant_slopes_img.gt(0).And(ee_significant_slopes_img.lt(1)), 0) # p00 
-        .where(ee_significant_slopes_img.gte(1).And(ee_significant_slopes_img.lt(2)), 1) # p01
-        .where(ee_significant_slopes_img.gte(2).And(ee_significant_slopes_img.lt(3)), 2) # p02
-        .where(ee_significant_slopes_img.gte(3).And(ee_significant_slopes_img.lt(4)), 3) # p03
-        .where(ee_significant_slopes_img.gte(4).And(ee_significant_slopes_img.lt(5)), 4) # p04
-        .where(ee_significant_slopes_img.gte(5).And(ee_significant_slopes_img.lt(6)), 5) # p05
-        .where(ee_significant_slopes_img.gte(6).And(ee_significant_slopes_img.lt(7)), 6) # p06
-        .where(ee_significant_slopes_img.gte(7).And(ee_significant_slopes_img.lt(8)), 7) # p07
-        .where(ee_significant_slopes_img.gte(8).And(ee_significant_slopes_img.lt(9)), 8) # p08
-        .where(ee_significant_slopes_img.gte(9).And(ee_significant_slopes_img.lt(10)), 9) # p09
-        .where(ee_significant_slopes_img.gte(10), 10) # p10
+        .where(ee_significant_slopes_img.lte(-3.5), -8) # n35
+        .where(ee_significant_slopes_img.gt(-3.5).And(ee_significant_slopes_img.lte(-3)), -7) # n30
+        .where(ee_significant_slopes_img.gt(-3).And(ee_significant_slopes_img.lte(-2.5)), -6) # n25
+        .where(ee_significant_slopes_img.gt(-2.5).And(ee_significant_slopes_img.lte(-2)), -5) # n20
+        .where(ee_significant_slopes_img.gt(-2).And(ee_significant_slopes_img.lte(-1.5)), -4) # n15
+        .where(ee_significant_slopes_img.gt(-1.5).And(ee_significant_slopes_img.lte(-1)), -3) # n10
+        .where(ee_significant_slopes_img.gt(-1).And(ee_significant_slopes_img.lte(-0.5)), -2) # n05 
+        .where(ee_significant_slopes_img.gt(-0.5).And(ee_significant_slopes_img.lt(0)), -1) # n00 
+        .where(ee_significant_slopes_img.gt(0).And(ee_significant_slopes_img.lt(0.5)), 0) # p00 
+        .where(ee_significant_slopes_img.gte(0.5).And(ee_significant_slopes_img.lt(1)), 1) # p05
+        .where(ee_significant_slopes_img.gte(1).And(ee_significant_slopes_img.lt(1.5)), 2) # p10
+        .where(ee_significant_slopes_img.gte(1.5).And(ee_significant_slopes_img.lt(2)), 3) # p15
+        .where(ee_significant_slopes_img.gte(2).And(ee_significant_slopes_img.lt(2.5)), 4) # p20
+        .where(ee_significant_slopes_img.gte(2.5).And(ee_significant_slopes_img.lt(3)), 5) # p25
+        .where(ee_significant_slopes_img.gte(3).And(ee_significant_slopes_img.lt(3.5)), 6) # p30
+        .where(ee_significant_slopes_img.gte(3.5), 7) # p35
     )
     # fmt: on
 
-    # Convert pixels with significant trends to Vectors per slope bin (-11 to 10)
+    # Convert pixels with significant trends to Vectors per slope bin (-4 to 3.5)
     ee_slope_bin_vectors_fc = (
         ee_slope_bin_img.toInt()
         .addBands(ee.image.Image(1))
@@ -164,9 +161,11 @@ def _ee_calc_year_trend_per_basin(
         )
     )
 
+    # fmt: off
     ee_slopes_list = ee.ee_list.List(
-        [-11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        [ -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7,]
     )
+    # fmt: on
 
     ee_slopes_bins_area_fc = ee.featurecollection.FeatureCollection(
         ee_slopes_list.map(
@@ -179,8 +178,8 @@ def _ee_calc_year_trend_per_basin(
     # fmt: off
     ee_newNames_list = ee.ee_list.List(
         [
-            "n10","n09","n08","n07","n06","n05","n04","n03","n02","n01","n00",
-            "p00","p01","p02","p03","p04","p05","p06","p07","p08","p09","p10",
+            "n35","n30","n25","n20","n15","n10","n05","n00",
+            "p00","p05","p10","p15","p20","p25","p30","p35",
         ]
     )
     # fmt: on
@@ -191,7 +190,9 @@ def _ee_calc_year_trend_per_basin(
     ) -> ee.feature.Feature:
 
         ee_slope_bin = ee_feature.get("Sen_slope")
-        ee_index = ee.ee_number.Number.parse(ee_slope_bin).add(11)
+        ee_index = ee.ee_number.Number.parse(ee_slope_bin).add(
+            8
+        )  # to get index from 0 to 15
         ee_newName = ee_newNames_list.get(ee_index)
         return ee.feature.Feature(ee_feature.set("Sen_slope", ee_newName))
 

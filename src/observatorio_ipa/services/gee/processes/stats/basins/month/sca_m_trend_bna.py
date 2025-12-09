@@ -10,7 +10,6 @@ Adapted from the JavaScript implementation at users/observatorionieves/modules/E
 """
 
 import ee
-from typing import Literal
 from observatorio_ipa.services.gee.processes.stats import common, trend
 from observatorio_ipa.services.gee.processes.stats.basins.month import sca_m_bna
 from observatorio_ipa.core.defaults import DEFAULT_SCALE, DEFAULT_CHI_PROJECTION
